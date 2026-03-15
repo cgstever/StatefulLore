@@ -96,7 +96,20 @@ function idbGetAll(store) {
 function getSessionKey() {
     const ctx = SillyTavern.getContext();
     const chatId = ctx.getCurrentChatId?.() || 'unknown';
-    const charName = ctx.characters?.[ctx.characterId]?.name || 'unknown';
+    // ctx.characterId is undefined in group chats; fall back to the last
+    // non-user, non-system message name so each character gets its own bucket.
+    let charName = ctx.characters?.[ctx.characterId]?.name;
+    if (!charName) {
+        const chatLog = ctx.chat || [];
+        for (let i = chatLog.length - 1; i >= 0; i--) {
+            const m = chatLog[i];
+            if (!m.is_user && !m.is_system && m.name) {
+                charName = m.name;
+                break;
+            }
+        }
+    }
+    charName = charName || 'unknown';
     return `${charName}::${chatId}`;
 }
 
@@ -299,41 +312,12 @@ globalThis.overwriteInterceptor = async function (chat, contextSize, abort, type
     await idbPut(STORE_STATE, sessionKey, state);
     await idbPut(STORE_PERSONA, personaKey, personaState);
 
-    const hasSTFormat = chat.some(m => 'is_user' in m && 'mes' in m);
-    const hasOpenAIFormat = chat.some(m => m.role === 'user' || m.role === 'assistant');
-
-    if (hasSTFormat || hasOpenAIFormat) {
-        const findLastUser = () => {
-            for (let i = chat.length - 1; i >= 0; i--) {
-                if (hasSTFormat ? (chat[i].is_user && !chat[i].is_system) : chat[i].role === 'user')
-                    return i;
-            }
-            return -1;
-        };
-        const getMes = (m) => hasSTFormat ? (m.mes || '') : (m.content || '');
-        const setMes = (m, val) => { if (hasSTFormat) m.mes = val; else m.content = val; };
-
-        const sysPrompt = turnResult.systemPrompt;
-        if (sysPrompt) {
-            const sysIdx = hasSTFormat
-                ? chat.findIndex(m => m.is_system)
-                : chat.findIndex(m => m.role === 'system');
-            if (sysIdx >= 0) setMes(chat[sysIdx], sysPrompt);
-        }
-
-        if (turnResult.brief) {
-            const ui = findLastUser();
-            if (ui >= 0) {
-                setMes(chat[ui], `[DIRECTOR]\n${turnResult.brief}\n[/DIRECTOR]\n\n` + getMes(chat[ui]));
-            }
-        }
-
-        if (Array.isArray(turnResult.inject)) {
-            for (const inj of turnResult.inject) {
-                applyInjection(chat, inj, hasSTFormat);
-            }
-        }
-    }
+    // Injection is handled entirely by the fetch interceptor below, which fires
+    // on the outgoing HTTP POST and covers both payload.messages (chat-format)
+    // and payload.prompt (text-completion) backends.  A direct chat-array
+    // mutation here would cause the header/brief to appear twice because ST
+    // serialises the already-mutated array into the same request body that the
+    // fetch interceptor then modifies again.
 
     window._owPendingInjection = {
         header: turnResult.header || null,

@@ -1153,6 +1153,10 @@ const _FRAGMENTS = [
     text_fail:"He keeps reaching for something that isn't there anymore. He does not always catch it.",
     fires_if:(s,c) => _genitalsChanged(c) && ['cis_male','unknown'].includes(c.identity) && (c.turns_since_change.genitals ?? 999) < 6 && c.ss < 2 && c.cs < 2 },
 
+  { stat:'CON', dc:10, group:'disorientation', priority:6,
+    text_pass:"The voice that comes out is still surprising. She hears it and recovers fast.",
+    text_fail:"The voice that comes out is still surprising. She hears it and there is a pause she cannot always hide.",
+    fires_if:(s,c) => c.changed.length >= 1 && _freshChange(c, null, 5) && c.ss < 3 },
   { stat:'CON', dc:10, group:'disorientation', priority:5,
     text_pass:"The body moves differently now. She is learning it faster than expected.",
     text_fail:"The body keeps moving in ways she hasn't learned yet. Reaching, sitting, standing — all slightly wrong.",
@@ -1326,7 +1330,24 @@ const _SLOT_BASE = {
   'chest,male,0':null,'chest,male,1':null,'chest,male,2':null,
   'chest,male,3':"His chest tightens",'chest,male,4':"His chest is exposed and oversensitive",
   'chest,male,5':"Even his chest aches now",
-
+  'hips,female,0':null,'hips,female,1':"Her hips shift",'hips,female,2':"Her hips tilt forward",
+  'hips,female,3':"Her hips are rolling in small involuntary pulses",'hips,female,4':"Her hips press and grind without permission",
+  'hips,female,5':"Her hips are grinding helplessly",
+  'hips,male,0':null,'hips,male,1':null,'hips,male,2':"His hips are restless",
+  'hips,male,3':"His hips want to move",'hips,male,4':"His hips roll without asking him",
+  'hips,male,5':"He has lost control of his hips",
+  'face,female,0':null,'face,female,1':"A faint flush at her cheeks",'face,female,2':"Her cheeks are pink, eyes soft at the edges",
+  'face,female,3':"Her face is flushed deep, lips parted",'face,female,4':"She is flushed to the throat, expression slipping",
+  'face,female,5':"Her face has let go entirely",
+  'face,male,0':null,'face,male,1':null,'face,male,2':"His face is flushed, jaw tight",
+  'face,male,3':"His cheeks are dark, breath coming harder",'face,male,4':"His expression has broken — flushed, jaw slack",
+  'face,male,5':"His face is nothing but want",
+  'voice,female,0':null,'voice,female,1':"Her breath has gone slightly uneven",'voice,female,2':"Her voice has softened and gone breathy",
+  'voice,female,3':"She is making small sounds she cannot stop",'voice,female,4':"Her voice has dissolved into something breathless",
+  'voice,female,5':"She cannot form sentences",
+  'voice,male,0':null,'voice,male,1':null,'voice,male,2':"His voice comes out rougher than intended",
+  'voice,male,3':"He cannot keep his voice level",'voice,male,4':"His voice has thickened completely",
+  'voice,male,5':"He cannot manage words",
 };
 
 const _PSYCH_COLOR = {
@@ -1393,6 +1414,24 @@ function _buildBodyFlavor(state, rs) {
     if (slotLines.length) {
       lines.push(''); lines.push('STATE:');
       lines.push(...slotLines.slice(0,4));
+    }
+  }
+
+  // Inferred arousal lines for face/voice/hips — fire off effective gender, not slot tracking
+  // Only in non-unified or no-change case; unified already has a comprehensive STATE sentence
+  if (!unified && ab >= 1) {
+    const inferredG = (state.body.slots.chest?.current && state.body.slots.chest.current !== birth)
+      ? state.body.slots.chest.current : g;
+    const inferredSlots = ['face', 'voice', 'hips'];
+    const inferredLines = [];
+    for (const slot of inferredSlots) {
+      const base = _SLOT_BASE[`${slot},${inferredG},${ab}`];
+      if (!base) continue;
+      inferredLines.push(`  ${base}.`);
+    }
+    if (inferredLines.length) {
+      if (!lines.includes('STATE:')) { lines.push(''); lines.push('STATE:'); }
+      lines.push(...inferredLines);
     }
   }
 

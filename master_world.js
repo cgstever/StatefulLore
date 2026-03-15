@@ -1472,11 +1472,7 @@ function _buildBodyFlavor(state, rs) {
     }
   }
 
-  // Fragments
-  const frags = _collectFragments(state, rs, 3);
-  if (frags.length) { lines.push(''); for (const f of frags) lines.push(`  ${f}`); }
-
-  const anyState = changed.length > 0 || cb > 0 || frags.length > 0;
+  const anyState = changed.length > 0 || cb > 0 || (state._aftermath_turn ?? -1) === state.turn;
   return anyState ? lines : [];
 }
 
@@ -1593,22 +1589,31 @@ function _castleFlavor(intensity, gender) {
   return _CASTLE_FLAVOR[`${intensity},${gender}`] || _CASTLE_FLAVOR[`${intensity},female`] || null;
 }
 
-function _worldRule(gender) {
-  if (gender === 'male') {
-    return "WORLD RULE: Time moves differently here. The world outside has already moved on. " +
-           "There is no rescue coming. Whatever he was before the forest — that life is already " +
-           "years or centuries behind him.";
-  }
-  return "WORLD RULE: Time moves differently here. The world outside has already moved on. " +
-         "There is no rescue coming. Whatever she was before the forest — that life is already " +
-         "years or centuries behind her.";
+function buildSystemPrompt(systemText) {
+  const prefix = [
+    '═══════════════════════════════════════════════════════════════════════════════',
+    "SETTING — THE OTHERWORLD (MASTER'S DOMAIN)",
+    '═══════════════════════════════════════════════════════════════════════════════',
+    '',
+    'Time moves differently here. The world outside has already moved on — years or centuries.',
+    'There is no rescue coming. Whatever this character was before the forest, that life is gone.',
+    "The Master's keep is a living thing. The domain responds to his will and to their state.",
+    '',
+    'THE MASTER: DOM 20 | WIL 20 | CON 18 | INT 20 | DES 12',
+    'He does not resist spells. He does not fail saves. He is the origin of the magic here.',
+    '',
+    '═══════════════════════════════════════════════════════════════════════════════',
+    '',
+    ''
+  ].join('\n');
+  return prefix + (systemText || '');
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // BUILD HEADER
 // ═══════════════════════════════════════════════════════════════════════════════
 
-function buildHeader(name, state, rs, arrival = false) {
+function buildHeader(name, state, rs) {
   const loc = state.flags.location;
   const turn = state.turn;
   const res = state.resistance;
@@ -1616,8 +1621,6 @@ function buildHeader(name, state, rs, arrival = false) {
 
   const ug = _unifiedGender(state);
   const g = ug || (state.body.birth_sex || 'female');
-
-  if (arrival) { lines.push(_worldRule(g)); lines.push(''); }
 
   const bodyFlavor = _buildBodyFlavor(state, rs);
   if (bodyFlavor.length) { lines.push(...bodyFlavor); lines.push(''); }
@@ -1699,18 +1702,68 @@ function buildHeader(name, state, rs, arrival = false) {
     lines.push('');
   }
 
-  // ROLL RESULTS
-  const rollLines = _rollFlavorLines(state, rs);
-  if (rollLines.length) { lines.push(...rollLines); lines.push(''); }
-
-  // CORRUPTION COMPULSION
-  if (cs >= 1) {
-    const fl = _CORRUPT_COMPULSION[`${g},${cs}`];
-    if (fl) { lines.push(fl); lines.push(''); }
-  }
-
   lines.push('[/STATE]');
   return lines.join('\n');
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// BUILD BRIEF
+// ═══════════════════════════════════════════════════════════════════════════════
+
+function buildBrief(name, state, events, rs) {
+  const lines = [];
+  const ug = _unifiedGender(state);
+  const g = ug || (state.body.birth_sex || 'female');
+
+  // Events this turn
+  const evtList = [];
+  const spell = events.spell || {};
+  if ((spell.tier || 0) > 0) {
+    const dir = spell.direction ? ` (${spell.direction})` : '';
+    const slots = (spell.slots || []).length;
+    evtList.push(`Tier ${spell.tier} spell${dir} — ${slots > 0 ? slots + ' slot(s) targeted' : 'unbound enchantment'}`);
+  }
+  if (events.orgasm)  evtList.push('Orgasm triggered');
+  if (events.dose)    evtList.push('Corruption dose absorbed');
+  if (events.collared) evtList.push('Collar applied this turn');
+  if (events.branded)  evtList.push('Brand applied this turn');
+  if (events.tokens?.length) evtList.push(`Tokens: ${events.tokens.join(', ')}`);
+
+  if (evtList.length) {
+    lines.push('EVENTS THIS TURN:');
+    for (const e of evtList) lines.push(`  • ${e}`);
+    lines.push('');
+  }
+
+  // Roll outcomes with narrative
+  const rollLines = _rollFlavorLines(state, rs);
+  if (rollLines.length) {
+    lines.push('OUTCOMES:');
+    for (const r of rollLines) lines.push(`  ${r}`);
+    lines.push('');
+  }
+
+  // Interior state — fragments
+  const frags = _collectFragments(state, rs, 3);
+  if (frags.length) {
+    lines.push('INTERIOR:');
+    for (const f of frags) lines.push(`  ${f}`);
+    lines.push('');
+  }
+
+  // Compulsion — hard behavioral constraint, model must honor this
+  const cs = state.corruption.stage;
+  if (cs >= 1) {
+    const fl = _CORRUPT_COMPULSION[`${g},${cs}`];
+    if (fl) {
+      lines.push('COMPULSION:');
+      lines.push(`  ${fl}`);
+      lines.push('');
+    }
+  }
+
+  if (!lines.length) return null;
+  return lines.join('\n').trim();
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -1766,7 +1819,7 @@ function processTurn({systemText, messages, state, personaState, config, charNam
       events: {},
       header,
       brief: null,
-      systemPrompt: null,
+      systemPrompt: buildSystemPrompt(systemText || ''),
       inject: [{text: header, position: 'before_last_user'}]
     };
   }
@@ -1905,18 +1958,17 @@ function processTurn({systemText, messages, state, personaState, config, charNam
     personaState.corruption_linked = state.orgasms.corruption_linked;
   }
 
-  // Build header
-  const arrival = (state.turn === 1 && !state.flags.arrival_shown);
-  if (arrival) state.flags.arrival_shown = true;
-  const header = buildHeader(name, state, rs, arrival);
+  // Build outputs
+  const header = buildHeader(name, state, rs);
+  const brief = buildBrief(name, state, events, rs);
 
   return {
     ok: true, name, sex, state,
     persona_state: personaState || {},
     events,
     header,
-    brief: null,
-    systemPrompt: null,
+    brief,
+    systemPrompt: buildSystemPrompt(systemText || ''),
     inject: [{text: header, position: 'before_last_user'}]
   };
 }

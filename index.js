@@ -15,7 +15,7 @@
 
 // ── Constants ───────────────────────────────────────────────────────────────
 
-const MODULE_NAME = ‘overwrite’;
+const MODULE_NAME = 'StatefulLore';
 
 const DEFAULTS = {
 enabled: true,

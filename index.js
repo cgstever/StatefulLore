@@ -989,6 +989,63 @@ function saveSettings() {
                                 modified = true;
                             }
                         }
+
+                        // Process positional inject entries.
+                        // Skip any entry whose text is already handled by pending.header
+                        // or pending.brief — those are injected above via the explicit paths.
+                        for (const inj of (pending.inject || [])) {
+                            if (!inj || !inj.text) continue;
+                            if (inj.text === pending.header || inj.text === pending.brief) continue;
+                            switch (inj.position) {
+                                case 'system': {
+                                    const sysIdx = payload.messages.findIndex(m => m.role === 'system');
+                                    if (sysIdx >= 0) {
+                                        payload.messages[sysIdx].content = inj.replace
+                                            ? inj.text
+                                            : payload.messages[sysIdx].content + '\n' + inj.text;
+                                        modified = true;
+                                    }
+                                    break;
+                                }
+                                case 'before_last_user': {
+                                    let ui = -1;
+                                    for (let i = payload.messages.length - 1; i >= 0; i--) {
+                                        if (payload.messages[i].role === 'user') { ui = i; break; }
+                                    }
+                                    if (ui >= 0) {
+                                        payload.messages[ui].content = inj.text + '\n\n' + (payload.messages[ui].content || '');
+                                        modified = true;
+                                    }
+                                    break;
+                                }
+                                case 'after_last_user': {
+                                    let ui = -1;
+                                    for (let i = payload.messages.length - 1; i >= 0; i--) {
+                                        if (payload.messages[i].role === 'user') { ui = i; break; }
+                                    }
+                                    if (ui >= 0) {
+                                        payload.messages[ui].content = (payload.messages[ui].content || '') + '\n\n' + inj.text;
+                                        modified = true;
+                                    }
+                                    break;
+                                }
+                                case 'depth': {
+                                    const depth = inj.depth || 0;
+                                    const pos = Math.max(0, payload.messages.length - depth);
+                                    payload.messages.splice(pos, 0, {
+                                        role: inj.role || 'system',
+                                        content: inj.text,
+                                    });
+                                    modified = true;
+                                    break;
+                                }
+                                case 'prefill': {
+                                    payload.messages.push({ role: 'assistant', content: inj.text });
+                                    modified = true;
+                                    break;
+                                }
+                            }
+                        }
                     } else if (payload.prompt && typeof payload.prompt === 'string') {
                         if (urlStr.includes('/settings/')) throw 'skip';
 
@@ -1005,6 +1062,25 @@ function saveSettings() {
                             payload.prompt = prompt;
                             modified = true;
                         }
+
+                        // Best-effort positional inject for text-completion format
+                        // depth/prefill/system are not directly expressible; before/after
+                        // last user turn are approximated via the last \n\nUser: boundary.
+                        for (const inj of (pending.inject || [])) {
+                            if (!inj || !inj.text) continue;
+                            if (inj.position === 'before_last_user' || inj.position === 'after_last_user') {
+                                const lastNewlines = prompt.lastIndexOf('\n\n');
+                                if (lastNewlines > prompt.length * 0.5) {
+                                    prompt = inj.position === 'before_last_user'
+                                        ? prompt.substring(0, lastNewlines) + '\n\n' + inj.text + prompt.substring(lastNewlines)
+                                        : prompt + '\n\n' + inj.text;
+                                } else {
+                                    prompt = inj.text + '\n\n' + prompt;
+                                }
+                                modified = true;
+                            }
+                        }
+                        if (modified) payload.prompt = prompt;
                     }
 
                     if (modified) {

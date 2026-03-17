@@ -545,6 +545,7 @@ function getSettingsHtml() {
                     <button id="ow-export-state" class="menu_button">Export</button>
                     <button id="ow-import-state" class="menu_button">Import</button>
                     <button id="ow-clear-state" class="menu_button redWarning">Clear (this chat)</button>
+                    <button id="ow-clear-persona" class="menu_button redWarning">Clear persona pill</button>
                 </div>
             </div>
         </div>
@@ -642,6 +643,7 @@ function bindSettingsEvents() {
     document.getElementById('ow-export-state')?.addEventListener('click', exportState);
     document.getElementById('ow-import-state')?.addEventListener('click', importState);
     document.getElementById('ow-clear-state')?.addEventListener('click', clearState);
+    document.getElementById('ow-clear-persona')?.addEventListener('click', clearPersonaState);
 }
 
 function bindCheckbox(id, key, onChange) {
@@ -788,6 +790,25 @@ async function clearState() {
     alert('State cleared.');
 }
 
+async function clearPersonaState() {
+    if (!confirm('Clear persona pill/effect state for this chat?')) return;
+    const personaKey = getPersonaKey();
+    await idbPut(STORE_PERSONA, personaKey, {});
+    // Also clear any old-format keys (persona::Name without chatId)
+    try {
+        const all = await idbGetAll(STORE_PERSONA);
+        for (const entry of all) {
+            const k = entry.id || '';
+            // Old format: persona::Name (exactly 2 segments)
+            if (k.startsWith('persona::') && k.split('::').length === 2) {
+                await idbDelete(STORE_PERSONA, k);
+                console.log('[OW] Deleted legacy persona key:', k);
+            }
+        }
+    } catch (ex) { console.warn('[OW] clearPersonaState migration:', ex); }
+    alert('Persona pill state cleared.');
+}
+
 // -- Debug panel -------------------------------------------------------------
 
 function updateDebugPanel(turn, state) {
@@ -932,6 +953,18 @@ function saveSettings() {
     try {
         db = await openDB();
         console.log('[OW] IndexedDB ready');
+        // Migrate legacy persona keys: delete old persona::Name entries (no chatId segment)
+        // These were created before v6.4.4 and cause pill state to bleed across chats
+        try {
+            const allPersona = await idbGetAll(STORE_PERSONA);
+            for (const entry of allPersona) {
+                const k = entry.id || '';
+                if (k.startsWith('persona::') && k.split('::').length === 2) {
+                    await idbDelete(STORE_PERSONA, k);
+                    console.log('[OW] Migrated: deleted legacy persona key', k);
+                }
+            }
+        } catch (ex) { console.warn('[OW] Persona migration failed:', ex); }
     } catch (ex) {
         console.error('[OW] IndexedDB failed:', ex);
         return;

@@ -121,7 +121,10 @@ function getSessionKey() {
 
 function getPersonaKey() {
     const ctx = SillyTavern.getContext();
-    return `persona::${ctx.name1 || 'User'}`;
+    // Include chatId so pill/effect state is scoped per chat, not globally per persona.
+    // Base stats are re-seeded from rs.personas on turn 1 so this is safe.
+    const chatId = ctx.getCurrentChatId?.() || 'unknown';
+    return `persona::${ctx.name1 || 'User'}::${chatId}`;
 }
 
 // -- Lore module loading -----------------------------------------------------

@@ -547,7 +547,6 @@ function getSettingsHtml() {
                     <button id="ow-export-state" class="menu_button">Export</button>
                     <button id="ow-import-state" class="menu_button">Import</button>
                     <button id="ow-clear-state" class="menu_button redWarning">Clear (this chat)</button>
-                    <button id="ow-clear-persona" class="menu_button redWarning">Clear persona pill</button>
                 </div>
             </div>
         </div>
@@ -645,7 +644,6 @@ function bindSettingsEvents() {
     document.getElementById('ow-export-state')?.addEventListener('click', exportState);
     document.getElementById('ow-import-state')?.addEventListener('click', importState);
     document.getElementById('ow-clear-state')?.addEventListener('click', clearState);
-    document.getElementById('ow-clear-persona')?.addEventListener('click', clearPersonaState);
 }
 
 function bindCheckbox(id, key, onChange) {
@@ -741,7 +739,9 @@ function renderModuleSettings() {
             </div>
         </div>`;
     if (typeof activeLore.onSettingsRendered === 'function') {
-        activeLore.onSettingsRendered(activeLore._config || {});
+        activeLore.onSettingsRendered(activeLore._config || {}, {
+            clearPersonaPill: clearPersonaState,
+        });
     }
 }
 

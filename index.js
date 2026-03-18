@@ -232,14 +232,8 @@ async function syncLoreFromServer(key, serverPath) {
 
 async function checkForLoreUpdate(silent = false) {
     if (!silent) showLoreInfo('Checking for updates...', '');
-
-    // Use the active lore module's own URLs if it declares them,
-    // otherwise fall back to the hardcoded X-Change World URLs.
-    const versionUrl = (activeLore && activeLore.versionUrl) ? activeLore.versionUrl : XCHANGE_VERSION_URL;
-    const loreUrl    = (activeLore && activeLore.updateUrl)  ? activeLore.updateUrl  : XCHANGE_LORE_URL;
-
     try {
-        const resp = await fetch(versionUrl + '?t=' + Date.now());
+        const resp = await fetch(XCHANGE_VERSION_URL + '?t=' + Date.now());
         if (!resp.ok) throw new Error(`Version check failed: ${resp.status}`);
         const { version: remoteVersion } = await resp.json();
         const localVersion = activeLore?.version ?? null;
@@ -251,7 +245,7 @@ async function checkForLoreUpdate(silent = false) {
 
         const fromStr = localVersion ? `v${localVersion}` : 'none';
         showLoreInfo(`Updating lore: ${fromStr} → v${remoteVersion}…`, '');
-        await loadLoreFromUrl(loreUrl);
+        await loadLoreFromUrl(XCHANGE_LORE_URL);
         showLoreInfo(`Updated to v${remoteVersion} ✓`, 'ok');
         return true;
     } catch (ex) {
@@ -367,6 +361,7 @@ globalThis.overwriteInterceptor = async function (chat, contextSize, abort, type
         brief: turnResult.brief || null,
         systemPrompt: turnResult.systemPrompt || null,
         inject: turnResult.inject || [],
+        scrub_words: turnResult.scrub_words || [],
         ts: Date.now(),
     };
 
@@ -1042,13 +1037,6 @@ function saveSettings() {
                     if (payload.messages && Array.isArray(payload.messages)) {
                         if (urlStr.includes('/settings/')) throw 'skip';
 
-                        // Scrub pill modifier/effect names from all history messages.
-                        // Model only needs color — not "breeder", "bimbo", "denial", etc.
-                        if (activeLore && typeof activeLore.sanitizeHistoryMessages === 'function') {
-                            payload.messages = activeLore.sanitizeHistoryMessages(payload.messages);
-                            modified = true;
-                        }
-
                         let lastUserIdx = -1;
                         for (let i = payload.messages.length - 1; i >= 0; i--) {
                             if (payload.messages[i].role === 'user') {
@@ -1168,6 +1156,27 @@ function saveSettings() {
                             }
                         }
                         if (modified) payload.prompt = prompt;
+                    }
+
+                    // Scrub effect names from all messages before sending to model
+                    const scrubWords = pending.scrub_words || (lastTurnResult && lastTurnResult.scrub_words) || [];
+                    if (scrubWords.length > 0) {
+                        // Build regex: match effect words at word boundaries (case-insensitive)
+                        const scrubPattern = new RegExp('\\b(' + scrubWords.join('|') + ')\\b\\s*', 'gi');
+                        if (payload.messages && Array.isArray(payload.messages)) {
+                            for (const msg of payload.messages) {
+                                if (msg.content && typeof msg.content === 'string' && msg.role !== 'system') {
+                                    msg.content = msg.content.replace(scrubPattern, '').replace(/\s{2,}/g, ' ').trim();
+                                }
+                            }
+                        }
+                        if (payload.prompt && typeof payload.prompt === 'string') {
+                            payload.prompt = payload.prompt.replace(scrubPattern, '').replace(/\s{2,}/g, ' ');
+                        }
+                        modified = true;
+                        if (settings.debug) {
+                            console.log('[OW] Scrubbed effect names from messages:', scrubWords.join(', '));
+                        }
                     }
 
                     if (modified) {

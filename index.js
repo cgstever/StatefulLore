@@ -1036,6 +1036,23 @@ function saveSettings() {
     const { eventSource, event_types } = ctx;
     if (eventSource && event_types) {
         eventSource.on(event_types.MESSAGE_RECEIVED, onMessageReceived);
+
+        // Reload saved state + refresh HUD when user switches to a different chat
+        if (event_types.CHAT_CHANGED) {
+            eventSource.on(event_types.CHAT_CHANGED, async () => {
+                try {
+                    const newState = await idbGet(STORE_STATE, getSessionKey());
+                    if (activeLore && typeof activeLore.updateHud === 'function') {
+                        activeLore.updateHud(newState || null, activeLore._config);
+                    }
+                    // Also refresh the debug panel if open
+                    if (settings.debug) refreshDebugPanel();
+                    console.log('[OW] Chat changed — reloaded state from IDB');
+                } catch (e) {
+                    console.warn('[OW] Failed to reload state on chat change:', e);
+                }
+            });
+        }
     }
 
     if (!window._owFetchInstalled) {
@@ -1208,6 +1225,13 @@ function saveSettings() {
                         opts.body = JSON.stringify(payload);
                         if (settings.debug) {
                             console.log('[OW] Fetch injection applied to:', urlStr);
+                            // Dump first system message so user can verify injection_rules are present
+                            if (payload.messages && payload.messages.length > 0) {
+                                const sysMsg = payload.messages.find(m => m.role === 'system');
+                                if (sysMsg) {
+                                    console.log('[OW] System message (first 2000 chars):\n' + (sysMsg.content || '').substring(0, 2000));
+                                }
+                            }
                         }
                     }
                 } catch (e) {

@@ -1158,24 +1158,50 @@ function saveSettings() {
                         if (modified) payload.prompt = prompt;
                     }
 
-                    // Scrub effect names from all messages before sending to model
+                    // Scrub effect names ONLY when adjacent to pill/xchange context
+                    // e.g. "green breeder xchange pill" → "green xchange pill"
+                    // but "I'm going to breed you" is untouched
                     const scrubWords = pending.scrub_words || (lastTurnResult && lastTurnResult.scrub_words) || [];
                     if (scrubWords.length > 0) {
-                        // Build regex: match effect words at word boundaries (case-insensitive)
-                        const scrubPattern = new RegExp('\\b(' + scrubWords.join('|') + ')\\b\\s*', 'gi');
+                        const ew = scrubWords.join('|');
+                        // Match effect word when near pill-related context words
+                        // Pattern: effect word followed by pill context, or pill context preceded by effect word
+                        const pillCtx = 'x[-\\s]?change|xchange|pill|capsule';
+                        const colorCtx = 'pink|blue|green|purple|red';
+                        // "green breeder xchange" / "breeder pill" / "a breeder xchange" / "green breeder pill"
+                        const patterns = [
+                            new RegExp('\\b(' + ew + ')\\s+(' + pillCtx + ')\\b', 'gi'),           // "breeder pill" → "pill"
+                            new RegExp('\\b(' + colorCtx + ')\\s+(' + ew + ')\\s+', 'gi'),         // "green breeder " → "green "
+                            new RegExp('\\b(' + ew + ')\\s+(' + colorCtx + ')\\s+', 'gi'),         // "breeder green " → "green "
+                            new RegExp('\\b(' + colorCtx + ')\\s+(' + ew + ')\\b', 'gi'),          // "green breeder" → "green"
+                            new RegExp('\\b(' + ew + ')\\s+(' + ew + ')\\s+(' + pillCtx + ')', 'gi'), // "breeder compliant pill" → "pill"
+                        ];
+                        const scrubContent = (text) => {
+                            let result = text;
+                            for (const pat of patterns) {
+                                result = result.replace(pat, (match, ...groups) => {
+                                    // Keep non-effect-name groups, remove effect-name groups
+                                    return match.replace(new RegExp('\\b(' + ew + ')\\b\\s*', 'gi'), '');
+                                });
+                            }
+                            return result.replace(/\s{2,}/g, ' ');
+                        };
                         if (payload.messages && Array.isArray(payload.messages)) {
                             for (const msg of payload.messages) {
                                 if (msg.content && typeof msg.content === 'string' && msg.role !== 'system') {
-                                    msg.content = msg.content.replace(scrubPattern, '').replace(/\s{2,}/g, ' ').trim();
+                                    const before = msg.content;
+                                    msg.content = scrubContent(msg.content);
+                                    if (before !== msg.content) modified = true;
                                 }
                             }
                         }
                         if (payload.prompt && typeof payload.prompt === 'string') {
-                            payload.prompt = payload.prompt.replace(scrubPattern, '').replace(/\s{2,}/g, ' ');
+                            const before = payload.prompt;
+                            payload.prompt = scrubContent(payload.prompt);
+                            if (before !== payload.prompt) modified = true;
                         }
-                        modified = true;
-                        if (settings.debug) {
-                            console.log('[OW] Scrubbed effect names from messages:', scrubWords.join(', '));
+                        if (settings.debug && modified) {
+                            console.log('[OW] Scrubbed effect names from pill references');
                         }
                     }
 

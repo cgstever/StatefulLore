@@ -1146,6 +1146,9 @@ function saveSettings() {
                                         content: inj.text,
                                     });
                                     modified = true;
+                                    if (settings.debug) {
+                                        console.log('[OW] DEPTH-0 HARD RULE injected at pos ' + pos + '/' + payload.messages.length + ':\n' + inj.text);
+                                    }
                                     break;
                                 }
                                 case 'prefill': {

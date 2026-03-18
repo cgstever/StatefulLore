@@ -361,7 +361,7 @@ globalThis.overwriteInterceptor = async function (chat, contextSize, abort, type
         brief: turnResult.brief || null,
         systemPrompt: turnResult.systemPrompt || null,
         inject: turnResult.inject || [],
-        scrub_words: turnResult.scrub_words || [],
+        scrubbed_messages: turnResult.scrubbed_messages || null,
         ts: Date.now(),
     };
 
@@ -1158,51 +1158,32 @@ function saveSettings() {
                         if (modified) payload.prompt = prompt;
                     }
 
-                    // Scrub effect names ONLY when adjacent to pill/xchange context
-                    // e.g. "green breeder xchange pill" → "green xchange pill"
-                    // but "I'm going to breed you" is untouched
-                    const scrubWords = pending.scrub_words || (lastTurnResult && lastTurnResult.scrub_words) || [];
-                    if (scrubWords.length > 0) {
-                        const ew = scrubWords.join('|');
-                        // Match effect word when near pill-related context words
-                        // Pattern: effect word followed by pill context, or pill context preceded by effect word
-                        const pillCtx = 'x[-\\s]?change|xchange|pill|capsule';
-                        const colorCtx = 'pink|blue|green|purple|red';
-                        // "green breeder xchange" / "breeder pill" / "a breeder xchange" / "green breeder pill"
-                        const patterns = [
-                            new RegExp('\\b(' + ew + ')\\s+(' + pillCtx + ')\\b', 'gi'),           // "breeder pill" → "pill"
-                            new RegExp('\\b(' + colorCtx + ')\\s+(' + ew + ')\\s+', 'gi'),         // "green breeder " → "green "
-                            new RegExp('\\b(' + ew + ')\\s+(' + colorCtx + ')\\s+', 'gi'),         // "breeder green " → "green "
-                            new RegExp('\\b(' + colorCtx + ')\\s+(' + ew + ')\\b', 'gi'),          // "green breeder" → "green"
-                            new RegExp('\\b(' + ew + ')\\s+(' + ew + ')\\s+(' + pillCtx + ')', 'gi'), // "breeder compliant pill" → "pill"
-                        ];
-                        const scrubContent = (text) => {
-                            let result = text;
-                            for (const pat of patterns) {
-                                result = result.replace(pat, (match, ...groups) => {
-                                    // Keep non-effect-name groups, remove effect-name groups
-                                    return match.replace(new RegExp('\\b(' + ew + ')\\b\\s*', 'gi'), '');
-                                });
-                            }
-                            return result.replace(/\s{2,}/g, ' ');
-                        };
-                        if (payload.messages && Array.isArray(payload.messages)) {
-                            for (const msg of payload.messages) {
-                                if (msg.content && typeof msg.content === 'string' && msg.role !== 'system') {
-                                    const before = msg.content;
-                                    msg.content = scrubContent(msg.content);
-                                    if (before !== msg.content) modified = true;
+                    // Apply scrubbed messages from lore engine (pill-context effect-name scrubbing)
+                    const scrubbedMsgs = pending.scrubbed_messages || (lastTurnResult && lastTurnResult.scrubbed_messages);
+                    if (scrubbedMsgs && payload.messages && Array.isArray(payload.messages)) {
+                        // The lore engine already scrubbed the chat messages; overlay them.
+                        // Build a lookup by index — scrubbed array matches the original
+                        // messages slice the lore saw, which is the last N messages.
+                        // Replace from the end of payload.messages backwards.
+                        const offset = payload.messages.length - scrubbedMsgs.length;
+                        for (let si = 0; si < scrubbedMsgs.length; si++) {
+                            const pi = offset + si;
+                            if (pi >= 0 && pi < payload.messages.length && scrubbedMsgs[si].content !== undefined) {
+                                if (payload.messages[pi].content !== scrubbedMsgs[si].content) {
+                                    payload.messages[pi].content = scrubbedMsgs[si].content;
+                                    modified = true;
                                 }
                             }
                         }
-                        if (payload.prompt && typeof payload.prompt === 'string') {
-                            const before = payload.prompt;
-                            payload.prompt = scrubContent(payload.prompt);
-                            if (before !== payload.prompt) modified = true;
-                        }
                         if (settings.debug && modified) {
-                            console.log('[OW] Scrubbed effect names from pill references');
+                            console.log('[OW] Applied lore-scrubbed messages (pill effect names)');
                         }
+                    }
+                    // Text-completion prompt: use lore's scrubPillText helper if available
+                    if (payload.prompt && typeof payload.prompt === 'string' && activeLore && typeof activeLore._scrubPillEffectText === 'function') {
+                        const before = payload.prompt;
+                        payload.prompt = activeLore._scrubPillEffectText(payload.prompt, activeLore._config);
+                        if (before !== payload.prompt) modified = true;
                     }
 
                     if (modified) {

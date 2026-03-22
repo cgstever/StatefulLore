@@ -1442,7 +1442,68 @@ function saveSettings() {
                         if (urlStr.includes('/settings/')) throw 'skip';
 
                         let prompt = payload.prompt;
-                        if (pending.header || pending.brief) {
+
+                        // ── Scene-page branch for Text Completion ────────
+                        // In text-completion mode the prompt is a single pre-formatted
+                        // string with instruct tokens.  We inject the scene page content
+                        // by finding the last user turn boundary and prepending the
+                        // header/brief/priority content before the user's text.
+                        if (settings.scenePageMode && (pending.header || pending.brief || pending.storySummary)) {
+                            // Build injection block
+                            const parts = [];
+
+                            // Story summary (Layer 3)
+                            if (pending.storySummary) {
+                                parts.push(pending.storySummary);
+                            }
+
+                            const isPriorityTurn = pending.priorityInjection === true
+                                || pending.recentMessageCount === 1;
+
+                            if (isPriorityTurn && pending.header) {
+                                // TX turn: header goes as priority context (Layer 5)
+                                if (pending.brief) {
+                                    parts.push('[DIRECTOR]\n' + pending.brief + '\n[/DIRECTOR]');
+                                }
+                                parts.push('[PRIORITY CONTEXT]\n' + pending.header + '\n[/PRIORITY CONTEXT]');
+                            } else {
+                                // Normal turn: header as scene context (Layer 2), brief in Layer 5
+                                if (pending.header) {
+                                    parts.push('[SCENE CONTEXT]\n' + pending.header + '\n[/SCENE CONTEXT]');
+                                }
+                                if (pending.brief) {
+                                    parts.push('[DIRECTOR]\n' + pending.brief + '\n[/DIRECTOR]');
+                                }
+                            }
+
+                            if (parts.length > 0) {
+                                const injection = parts.join('\n\n');
+                                // Find the last user turn marker in the prompt
+                                // ChatML format: <|im_start|>user\n
+                                const lastUserMarker = prompt.lastIndexOf('<|im_start|>user\n');
+                                if (lastUserMarker > 0) {
+                                    // Insert after the user token, before user's text
+                                    const insertPos = lastUserMarker + '<|im_start|>user\n'.length;
+                                    prompt = prompt.substring(0, insertPos) + injection + '\n\n' + prompt.substring(insertPos);
+                                } else {
+                                    // Fallback: prepend near end of prompt
+                                    const lastNewlines = prompt.lastIndexOf('\n\n');
+                                    if (lastNewlines > prompt.length * 0.5) {
+                                        prompt = prompt.substring(0, lastNewlines) + '\n\n' + injection + prompt.substring(lastNewlines);
+                                    } else {
+                                        prompt = injection + '\n\n' + prompt;
+                                    }
+                                }
+                            }
+
+                            payload.prompt = prompt;
+                            window._owPendingInjection = null;
+                            opts.body = JSON.stringify(payload);
+                            if (settings.debug) {
+                                console.log('[OW] Scene page (text-completion) injected. Priority=' + (isPriorityTurn ? 'YES' : 'no') +
+                                    ' promptLen=' + prompt.length);
+                            }
+                        } else if (pending.header || pending.brief) {
                             const injection = (pending.brief ? `[DIRECTOR]\n${pending.brief}\n[/DIRECTOR]\n\n` : '') +
                                               (pending.header || '');
                             const lastNewlines = prompt.lastIndexOf('\n\n');

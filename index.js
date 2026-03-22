@@ -455,19 +455,21 @@ function buildScenePage(pending, messages) {
     }
 
     // --- Layer 2: Scene context (lore engine header) ------------------------
-    // Detect transformation turns: the engine sets recentMessageCount to 1 on
-    // TX turns, and the header will contain transformation-specific markers.
-    const isTxTurn = pending.recentMessageCount === 1
-        || (pending.header && /TRANSFORMATION GUIDANCE|TX_BANNER|buildTransformationGuidance/i.test(pending.header));
+    // Detect priority-injection turns: the lore engine flags turns where
+    // content should be placed front-and-center (Layer 5) rather than as
+    // background context (Layer 2).  recentMessageCount === 1 is kept as a
+    // secondary signal for backwards compatibility.
+    const isPriorityTurn = pending.priorityInjection === true
+        || pending.recentMessageCount === 1;
 
-    if (pending.header && !isTxTurn) {
+    if (pending.header && !isPriorityTurn) {
         // Normal turn — header goes in Layer 2 as scene context
         scenePage.push({
             role: 'system',
             content: '[SCENE CONTEXT]\n' + pending.header + '\n[/SCENE CONTEXT]',
         });
     }
-    // On TX turns the header is held back and injected into Layer 5 instead,
+    // On priority turns the header is held back and injected into Layer 5,
     // so the model treats it as an active instruction rather than background.
 
     // --- Layer 3: Story summary (beat history) ------------------------------
@@ -514,14 +516,11 @@ function buildScenePage(pending, messages) {
             content = `[DIRECTOR]\n${pending.brief}\n[/DIRECTOR]\n\n` + content;
         }
 
-        // On TX turns, inject the full header as an active transformation
-        // instruction between the director brief and the user's text.
-        if (isTxTurn && pending.header) {
-            const txInstruction = '\n\nWRITE THE TRANSFORMATION SCENE NOW. '
-                + 'Describe the physical changes happening to your body in first person. '
-                + 'Use concrete sensations — tingling, warmth, pressure, shifting. '
-                + 'Multiple paragraphs with paragraph breaks.';
-            content = `[TRANSFORMATION SCENE]\n${pending.header}${txInstruction}\n[/TRANSFORMATION SCENE]\n\n` + content;
+        // On priority turns, inject the full header as an active instruction
+        // between the director brief and the user's text.  The lore engine
+        // includes its own write instruction, so the plugin stays generic.
+        if (isPriorityTurn && pending.header) {
+            content = `[PRIORITY CONTEXT]\n${pending.header}\n[/PRIORITY CONTEXT]\n\n` + content;
         }
 
         // Process remaining inject entries (non-system, non-header, non-brief)

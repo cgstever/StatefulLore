@@ -373,6 +373,7 @@ globalThis.overwriteInterceptor = async function (chat, contextSize, abort, type
         // Phase 2 — scene page fields (from engine's processTurn return)
         storySummary: turnResult.storySummary || null,
         recentMessageCount: turnResult.recentMessageCount || null,
+        priorityInjection: turnResult.priorityInjection || false,
         ts: Date.now(),
     };
 

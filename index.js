@@ -1500,6 +1500,24 @@ function saveSettings() {
                             payload.prompt = prompt;
                             window._owLastPrompt = prompt;
                             window._owLastScenePage = {hasPriority: isPriorityTurn, headerLen: (pending.header||'').length, briefLen: (pending.brief||'').length, summaryLen: (pending.storySummary||'').length};
+
+                            // On priority/TX turns, replace the post-history
+                            // instructions that ST adds. The normal post-history
+                            // says "match their energy, 2-4 paragraphs" which
+                            // causes the model to give short responses on TX turns.
+                            if (isPriorityTurn) {
+                                const phMarker = prompt.lastIndexOf('[/PRIORITY CONTEXT]');
+                                const assistantMarker = prompt.lastIndexOf('<|im_start|>assistant');
+                                if (phMarker > 0 && assistantMarker > phMarker) {
+                                    // Replace everything between end of priority context and assistant marker
+                                    // with a TX-appropriate instruction
+                                    prompt = prompt.substring(0, phMarker + '[/PRIORITY CONTEXT]'.length) +
+                                        '\n\nWrite the full transformation scene now. Multiple detailed paragraphs.' +
+                                        prompt.substring(assistantMarker);
+                                    payload.prompt = prompt;
+                                }
+                            }
+
                             window._owPendingInjection = null;
                             opts.body = JSON.stringify(payload);
                             if (settings.debug) {

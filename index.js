@@ -1518,6 +1518,20 @@ function saveSettings() {
                                 }
                             }
 
+                            // On priority turns, also append the write instruction
+                            // right before <|im_start|>assistant so it's the LAST
+                            // thing the model sees, after any post-history ST adds.
+                            if (isPriorityTurn) {
+                                const assistantTag = '<|im_start|>assistant';
+                                const aIdx = prompt.lastIndexOf(assistantTag);
+                                if (aIdx > 0) {
+                                    prompt = prompt.substring(0, aIdx) +
+                                        '<|im_start|>system\nWrite the full transformation scene now. Use the physical guide as your style reference. Multiple detailed paragraphs. Each physical change gets its own paragraph. Do not write a short response.<|im_end|>\n' +
+                                        prompt.substring(aIdx);
+                                    payload.prompt = prompt;
+                                }
+                            }
+
                             window._owPendingInjection = null;
                             opts.body = JSON.stringify(payload);
                             if (settings.debug) {

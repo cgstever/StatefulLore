@@ -1340,6 +1340,27 @@ function saveSettings() {
                                 }
                             }
 
+                            // On priority/TX turns in chat completion mode,
+                            // we have full control of the message array.
+                            // Replace the post-history instruction (if ST added one)
+                            // with a TX-appropriate instruction, and ensure the
+                            // TX write directive is the last system message.
+                            if (pending.priorityInjection || pending.recentMessageCount === 1) {
+                                // Find and remove any trailing user message that looks
+                                // like ST's post-history (usually the last message with
+                                // generic instructions like "Keep output focused")
+                                const lastMsg = payload.messages[payload.messages.length - 1];
+                                if (lastMsg && lastMsg.role === 'user' &&
+                                    lastMsg.content && lastMsg.content.includes('Keep output focused')) {
+                                    payload.messages.pop();
+                                }
+                                // Append TX write directive as final system message
+                                payload.messages.push({
+                                    role: 'system',
+                                    content: 'Write the full transformation scene now. Use the physical guide as your style reference. Multiple detailed paragraphs describing each physical change. Each change gets its own paragraph. Do not write a short response.'
+                                });
+                            }
+
                             window._owLastScenePage = {mode: 'chat', msgCount: payload.messages.length, roles: payload.messages.map(m=>m.role)};
                             window._owPendingInjection = null;
                             opts.body = JSON.stringify(payload);

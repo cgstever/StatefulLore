@@ -431,6 +431,26 @@ function getTokenBudgets(contextSize) {
  * @param {Array}  messages - payload.messages from the outgoing request
  * @returns {Array} the assembled scene page message array
  */
+
+/**
+ * Convert a messages array into a ChatML-formatted prompt string.
+ * This gives the plugin full control over the prompt in text completion mode
+ * without needing a model-specific chat template.
+ */
+function messagesToChatML(messages, isPriorityTurn) {
+    let prompt = '';
+    for (const msg of messages) {
+        prompt += '<|im_start|>' + (msg.role || 'user') + '\n' + (msg.content || '') + '<|im_end|>\n';
+    }
+    // On priority/TX turns, add the TX directive as a final system message
+    if (isPriorityTurn) {
+        prompt += '<|im_start|>system\nWrite the full transformation scene now. Use the physical guide as your style reference. Multiple detailed paragraphs describing each physical change. Each change gets its own paragraph. Do not write a short response.<|im_end|>\n';
+    }
+    // End with assistant start token so the model generates
+    prompt += '<|im_start|>assistant\n';
+    return prompt;
+}
+
 function buildScenePage(pending, messages) {
     const scenePage = [];
 
@@ -1471,53 +1491,43 @@ function saveSettings() {
                         // by finding the last user turn boundary and prepending the
                         // header/brief/priority content before the user's text.
                         if (settings.scenePageMode && (pending.header || pending.brief || pending.storySummary)) {
-                            // Build injection block
-                            const parts = [];
+                            // ── Full prompt control via scene page ──────────
+                            // Build the scene page as a messages array (same as
+                            // chat completion), then convert to a ChatML prompt
+                            // string.  This gives the plugin full control over
+                            // what the model sees, regardless of what ST built.
 
-                            // Story summary (Layer 3)
-                            if (pending.storySummary) {
-                                parts.push(pending.storySummary);
+                            // We need a messages array to pass to buildScenePage.
+                            // In text completion mode ST doesn't give us one, so
+                            // we reconstruct a minimal array from the prompt.
+                            const fakeMessages = [];
+
+                            // Extract system message (everything between first
+                            // <|im_start|>system and its <|im_end|>)
+                            const sysStart = prompt.indexOf('<|im_start|>system\n');
+                            const sysEnd = prompt.indexOf('<|im_end|>', sysStart);
+                            if (sysStart >= 0 && sysEnd > sysStart) {
+                                fakeMessages.push({
+                                    role: 'system',
+                                    content: prompt.substring(sysStart + '<|im_start|>system\n'.length, sysEnd)
+                                });
                             }
+
+                            // Extract all user and assistant messages
+                            const msgRe = /<\|im_start\|>(user|assistant)\n([\s\S]*?)<\|im_end\|>/g;
+                            let match;
+                            while ((match = msgRe.exec(prompt)) !== null) {
+                                fakeMessages.push({ role: match[1], content: match[2].trim() });
+                            }
+
+                            // Build scene page from the reconstructed messages
+                            const sceneMessages = buildScenePage(pending, fakeMessages);
 
                             const isPriorityTurn = pending.priorityInjection === true
                                 || pending.recentMessageCount === 1;
 
-                            if (isPriorityTurn && pending.header) {
-                                // TX turn: header goes as priority context (Layer 5)
-                                if (pending.brief) {
-                                    parts.push('[DIRECTOR]\n' + pending.brief + '\n[/DIRECTOR]');
-                                }
-                                parts.push('[PRIORITY CONTEXT]\n' + pending.header + '\n[/PRIORITY CONTEXT]');
-                            } else {
-                                // Normal turn: header as scene context (Layer 2), brief in Layer 5
-                                if (pending.header) {
-                                    parts.push('[SCENE CONTEXT]\n' + pending.header + '\n[/SCENE CONTEXT]');
-                                }
-                                if (pending.brief) {
-                                    parts.push('[DIRECTOR]\n' + pending.brief + '\n[/DIRECTOR]');
-                                }
-                            }
-
-                            if (parts.length > 0) {
-                                const injection = parts.join('\n\n');
-                                // Find the last user turn marker in the prompt
-                                // ChatML format: <|im_start|>user\n
-                                const lastUserMarker = prompt.lastIndexOf('<|im_start|>user\n');
-                                if (lastUserMarker > 0) {
-                                    // Insert after the user token, before user's text
-                                    const insertPos = lastUserMarker + '<|im_start|>user\n'.length;
-                                    prompt = prompt.substring(0, insertPos) + injection + '\n\n' + prompt.substring(insertPos);
-                                } else {
-                                    // Fallback: prepend near end of prompt
-                                    const lastNewlines = prompt.lastIndexOf('\n\n');
-                                    if (lastNewlines > prompt.length * 0.5) {
-                                        prompt = prompt.substring(0, lastNewlines) + '\n\n' + injection + prompt.substring(lastNewlines);
-                                    } else {
-                                        prompt = injection + '\n\n' + prompt;
-                                    }
-                                }
-                            }
-
+                            // Convert to ChatML prompt string
+                            prompt = messagesToChatML(sceneMessages, isPriorityTurn);
                             payload.prompt = prompt;
                             window._owLastPrompt = prompt;
                             window._owLastScenePage = {hasPriority: isPriorityTurn, headerLen: (pending.header||'').length, briefLen: (pending.brief||'').length, summaryLen: (pending.storySummary||'').length};

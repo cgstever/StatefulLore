@@ -1369,6 +1369,17 @@ function saveSettings() {
                                 }
                             }
 
+                            // Aggressive pill phrase scrub: strip entire pill
+                            // descriptor (color + modifiers + pill noun) from
+                            // all user messages so the model never sees pill
+                            // types, colors, or effect names in the text.
+                            const pillPhraseRe = /\b(pink|blue|green|purple|red|grey)\s+[\w\s]{0,40}?\b(x-?change|xchange)\s*(pill|capsule|tablet|dose)\b/gi;
+                            for (const pm of payload.messages) {
+                                if (pm.role === 'user' && pm.content) {
+                                    pm.content = pm.content.replace(pillPhraseRe, 'the pill');
+                                }
+                            }
+
                             // On priority/TX turns in chat completion mode,
                             // we have full control of the message array.
                             // Replace the post-history instruction (if ST added one)

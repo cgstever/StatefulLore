@@ -558,15 +558,19 @@ function buildScenePage(pending, messages) {
                     content = content + '\n\n' + inj.text;
                     break;
                 case 'depth': {
-                    // In scene page mode, depth injections relative to the end
-                    // of the (now-small) message array.  Insert into scenePage
-                    // at the appropriate offset from the end.
+                    // In scene page mode, depth-0 injections (hard rules)
+                    // get merged into the first system message to prevent
+                    // the model from echoing them as visible text.
                     const depth = inj.depth || 0;
-                    const pos = Math.max(0, scenePage.length - depth);
-                    scenePage.splice(pos, 0, {
-                        role: inj.role || 'system',
-                        content: inj.text,
-                    });
+                    if (depth === 0 && scenePage.length > 0 && scenePage[0].role === 'system') {
+                        scenePage[0].content += '\n\n' + inj.text;
+                    } else {
+                        const pos = Math.max(0, scenePage.length - depth);
+                        scenePage.splice(pos, 0, {
+                            role: inj.role || 'system',
+                            content: inj.text,
+                        });
+                    }
                     break;
                 }
                 // prefill is handled after the user message is pushed

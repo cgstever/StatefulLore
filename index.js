@@ -540,9 +540,9 @@ function buildScenePage(pending, messages) {
         // On priority turns, inject the full header as an active instruction
         // between the director brief and the user's text.  The lore engine
         // includes its own write instruction, so the plugin stays generic.
-        if (isPriorityTurn && pending.header) {
-            content = `[PRIORITY CONTEXT]\n${pending.header}\n[/PRIORITY CONTEXT]\n\n` + content;
-        }
+        // On priority turns, TX header goes as final system message instead
+        // of being embedded here. User message stays clean.
+        // if (isPriorityTurn && pending.header) { ... moved to post-assembly }
 
         // Process remaining inject entries (non-system, non-header, non-brief)
         for (const inj of (pending.inject || [])) {
@@ -1383,10 +1383,13 @@ function saveSettings() {
                                     lastMsg.content && lastMsg.content.includes('Keep output focused')) {
                                     payload.messages.pop();
                                 }
-                                // Append TX write directive as final system message
+                                // Append the full TX header + write directive as final system message.
+                                // This is the LAST thing the model sees before generating.
+                                const txContent = (pending.header || '') +
+                                    '\n\nWrite the full transformation scene now. Use the physical guide above as your style reference. Multiple detailed paragraphs describing each physical change. Each change gets its own paragraph. Do not write a short response.';
                                 payload.messages.push({
                                     role: 'system',
-                                    content: 'Write the full transformation scene now. Use the physical guide as your style reference. Multiple detailed paragraphs describing each physical change. Each change gets its own paragraph. Do not write a short response.'
+                                    content: txContent
                                 });
                             }
 

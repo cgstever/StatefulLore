@@ -375,8 +375,50 @@ globalThis.overwriteInterceptor = async function (chat, contextSize, abort, type
         priorityInjection: turnResult.priorityInjection || false,
         ts: Date.now(),
     };
-    // Also store a persistent copy that won't be cleared by timing issues
-    window._owScenePagePending = JSON.parse(JSON.stringify(window._owPendingInjection));
+
+    // ── Use ST's official extension prompt API ──────────────────────
+    // This injects content into ST's prompt assembly pipeline, AFTER
+    // all post-processing. Content set here WILL reach the model.
+    const ctx = SillyTavern.getContext();
+
+    // Inject header as a system prompt at depth 1 (just before last user message)
+    if (turnResult.header) {
+        // Apply pill scrubbing to header
+        let cleanHeader = turnResult.header;
+        if (activeLore && typeof activeLore._scrubPillEffectText === 'function') {
+            cleanHeader = activeLore._scrubPillEffectText(cleanHeader, activeLore._config);
+        }
+        ctx.setExtensionPrompt('OW_HEADER', cleanHeader, 1, 1, false, 0);
+    } else {
+        ctx.setExtensionPrompt('OW_HEADER', '', 1, 1, false, 0);
+    }
+
+    // Inject brief at depth 0 (at the end, closest to model generation)
+    if (turnResult.brief) {
+        let cleanBrief = turnResult.brief;
+        if (activeLore && typeof activeLore._scrubPillEffectText === 'function') {
+            cleanBrief = activeLore._scrubPillEffectText(cleanBrief, activeLore._config);
+        }
+        ctx.setExtensionPrompt('OW_BRIEF', cleanBrief, 1, 0, false, 0);
+    } else {
+        ctx.setExtensionPrompt('OW_BRIEF', '', 1, 0, false, 0);
+    }
+
+    // Inject story summary if available
+    if (turnResult.storySummary) {
+        ctx.setExtensionPrompt('OW_STORY', turnResult.storySummary, 1, 2, false, 0);
+    } else {
+        ctx.setExtensionPrompt('OW_STORY', '', 1, 2, false, 0);
+    }
+
+    // Debug capture
+    window._owScenePageDebug = {
+        headerLen: turnResult.header?.length || 0,
+        briefLen: turnResult.brief?.length || 0,
+        storyLen: turnResult.storySummary?.length || 0,
+        priorityInjection: turnResult.priorityInjection,
+        headerPreview: (turnResult.header || '').substring(0, 200),
+    };
 
     if (settings.debug) {
         console.log('[OW] Turn processed', {

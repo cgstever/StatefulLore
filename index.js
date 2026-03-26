@@ -364,7 +364,7 @@ globalThis.overwriteInterceptor = async function (chat, contextSize, abort, type
     // serialises the already-mutated array into the same request body that the
     // fetch interceptor then modifies again.
 
-    const _pending = {
+    window._owPendingInjection = {
         header: turnResult.header || null,
         brief: turnResult.brief || null,
         systemPrompt: turnResult.systemPrompt || null,
@@ -375,49 +375,8 @@ globalThis.overwriteInterceptor = async function (chat, contextSize, abort, type
         priorityInjection: turnResult.priorityInjection || false,
         ts: Date.now(),
     };
-    window._owPendingInjection = _pending;
-
-    // ── Scene Page: modify chat array directly ──────────────────────
-    // In Chat Completion mode, `chat` is the messages array ST sends.
-    // Modifying it here (before ST serializes the request) ensures the
-    // model sees our scene page content. No fetch interceptor needed.
-    if (settings.scenePageMode && chat && Array.isArray(chat) && chat.length > 0) {
-        const sceneMessages = buildScenePage(_pending, chat);
-
-        // Apply pill scrubbing to scene page messages
-        if (activeLore && typeof activeLore._scrubPillEffectText === 'function') {
-            for (const pm of sceneMessages) {
-                if (pm.role === 'user' || pm.role === 'assistant') {
-                    pm.content = activeLore._scrubPillEffectText(pm.content || '', activeLore._config);
-                }
-            }
-        }
-
-        // On priority/TX turns, replace post-history and add TX directive
-        if (_pending.priorityInjection || _pending.recentMessageCount === 1) {
-            // Remove post-history if present
-            const lastMsg = sceneMessages[sceneMessages.length - 1];
-            if (lastMsg && lastMsg.role === 'user' && lastMsg.content && lastMsg.content.includes('Keep output focused')) {
-                sceneMessages.pop();
-            }
-            // Append TX write directive as final system message
-            const txContent = (_pending.header || '') +
-                '\nWrite the full transformation scene now. Use the style reference above. Multiple detailed paragraphs. Each change gets its own paragraph.';
-            sceneMessages.push({ role: 'system', content: txContent });
-        }
-
-        // Replace chat contents in-place (ST holds the reference)
-        chat.length = 0;
-        for (const msg of sceneMessages) {
-            chat.push(msg);
-        }
-
-        // Debug capture
-        window._owScenePageDebug = sceneMessages.map(m => ({role: m.role, len: (m.content||'').length, hasStyleRef: (m.content||'').includes('STYLE REFERENCE'), hasGuide: (m.content||'').includes('lean frame') || (m.content||'').includes('height dropping'), hasGolden: (m.content||'').includes('Write ONLY as'), preview: (m.content||'').substring(0, 200)}));
-
-        // Clear pending since we handled it here
-        window._owPendingInjection = null;
-    }
+    // Also store a persistent copy that won't be cleared by timing issues
+    window._owScenePagePending = JSON.parse(JSON.stringify(window._owPendingInjection));
 
     if (settings.debug) {
         console.log('[OW] Turn processed', {
@@ -1383,9 +1342,11 @@ function saveSettings() {
                 }
             } catch(e) { window._owFetchDebug.parseError = e.message; }
 
-            if (pending && pending.ts && (Date.now() - pending.ts < 30000) &&
+            const effectivePending = pending || window._owScenePagePending;
+            if (effectivePending && effectivePending.ts && (Date.now() - effectivePending.ts < 30000) &&
                 opts?.method === 'POST' && opts?.body && typeof opts.body === 'string' && opts.body.length > 500) {
                 try {
+                    const pending = effectivePending;
                     const payload = JSON.parse(opts.body);
                     let modified = false;
 

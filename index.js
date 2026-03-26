@@ -1335,6 +1335,8 @@ function saveSettings() {
                         // Falls through to the legacy path when the toggle is off.
                         if (settings.scenePageMode) {
                             payload.messages = buildScenePage(pending, payload.messages);
+                            // Debug: capture final messages for diagnosis
+                            window._owScenePageDebug = payload.messages.map(m => ({role: m.role, len: (m.content||'').length, hasStyleRef: (m.content||'').includes('STYLE REFERENCE'), hasGuide: (m.content||'').includes('lean frame') || (m.content||'').includes('height dropping'), hasGolden: (m.content||'').includes('Write ONLY as'), preview: (m.content||'').substring(0, 200)}));
 
                             // Apply pill-effect name scrubbing to the recent
                             // messages inside the scene page.

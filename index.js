@@ -1320,6 +1320,27 @@ function saveSettings() {
             const urlStr = typeof url === 'string' ? url : url?.url || '';
             const pending = window._owPendingInjection;
 
+            // Top-level fetch debug
+            window._owFetchDebug = {
+                hasPending: !!pending,
+                pendingTs: pending?.ts,
+                pendingAge: pending ? Date.now() - pending.ts : -1,
+                method: opts?.method,
+                bodyType: typeof opts?.body,
+                bodyLen: opts?.body?.length || 0,
+                hasMessages: false,
+                hasPrompt: false,
+                scenePageMode: settings.scenePageMode,
+            };
+            try {
+                if (opts?.body && typeof opts.body === 'string') {
+                    const _testBody = JSON.parse(opts.body);
+                    window._owFetchDebug.hasMessages = !!(_testBody.messages && Array.isArray(_testBody.messages));
+                    window._owFetchDebug.hasPrompt = !!(typeof _testBody.prompt === 'string');
+                    window._owFetchDebug.msgCount = _testBody.messages?.length || 0;
+                }
+            } catch(e) { window._owFetchDebug.parseError = e.message; }
+
             if (pending && pending.ts && (Date.now() - pending.ts < 30000) &&
                 opts?.method === 'POST' && opts?.body && typeof opts.body === 'string' && opts.body.length > 500) {
                 try {

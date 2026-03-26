@@ -409,6 +409,20 @@ globalThis.overwriteInterceptor = async function (chat, contextSize, abort, type
         ctx.setExtensionPrompt('OW_STORY', '', 1, 2, false, 0);
     }
 
+    // ── Scrub pill text from chat messages ────────────────────────
+    // The chat array is passed by reference — modifying message
+    // content here will affect what ST sends to the model.
+    if (activeLore && typeof activeLore._scrubPillEffectText === 'function') {
+        for (let i = 0; i < chat.length; i++) {
+            if (chat[i] && chat[i].mes && typeof chat[i].mes === 'string') {
+                chat[i].mes = activeLore._scrubPillEffectText(chat[i].mes, activeLore._config);
+            }
+            if (chat[i] && chat[i].extra && chat[i].extra.display_text && typeof chat[i].extra.display_text === 'string') {
+                // Don't modify display_text — that's what shows in the UI
+            }
+        }
+    }
+
     // Debug capture
     window._owScenePageDebug = {
         headerLen: turnResult.header?.length || 0,
@@ -416,6 +430,7 @@ globalThis.overwriteInterceptor = async function (chat, contextSize, abort, type
         storyLen: turnResult.storySummary?.length || 0,
         priorityInjection: turnResult.priorityInjection,
         headerPreview: (turnResult.header || '').substring(0, 200),
+        chatScrubbed: true,
     };
 
     if (settings.debug) {

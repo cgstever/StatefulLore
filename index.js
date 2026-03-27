@@ -364,8 +364,7 @@ function buildScenePage(pending, messages) {
     if (pending.personaBlock && !isTxTurn) {
         scenePage.push({
             role: 'system',
-            content: '[This is the PLAYER/USER you are interacting with — not you. Do not write from this perspective.]
-' + pending.personaBlock,
+            content: '[This is the PLAYER/USER you are interacting with - not you. Do not write from this perspective.]\n' + pending.personaBlock,
         });
     }
 

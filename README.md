@@ -71,6 +71,14 @@ The result is a system where complex, long-running mechanics work reliably — n
 
 ---
 
+## Requirements
+
+StatefulLore requires SillyTavern to be set to **Chat Completion mode**. This is the mode where the prompt is sent as a structured messages array rather than a single text string. The extension intercepts that messages array and rebuilds it each turn — text completion mode is not currently supported.
+
+In SillyTavern: **API Connections → Chat Completion** (not Text Completion).
+
+---
+
 ## Installation
 
 ### Method 1: SillyTavern Extension Installer

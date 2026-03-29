@@ -1,5 +1,5 @@
 /**
- * StatefullLore  --  SillyTavern Extension
+ * StatefulLore  --  SillyTavern Extension
  *
  * A programmable lore engine that replaces ST's lorebook with stateful,
  * code-driven game logic. Loads JS lore modules that implement
@@ -1153,7 +1153,7 @@ function saveSettings() {
         wrapper.innerHTML = `
             <div class="inline-drawer">
                 <div class="inline-drawer-toggle inline-drawer-header">
-                    <b>StatefullLore</b>
+                    <b>StatefulLore</b>
                     <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
                 </div>
                 <div class="inline-drawer-content">

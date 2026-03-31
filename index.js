@@ -1275,6 +1275,7 @@ function saveSettings() {
                                 config: activeLore._config || {},
                                 charNameHint: charData?.name || null,
                                 personaName: ctx.name1 || null,
+                                cardPersonality: charData?.personality || '',
                             });
                         } catch (ex) {
                             console.error('[OW] processTurn error:', ex);
@@ -1431,6 +1432,7 @@ function saveSettings() {
                                     config: activeLore._config || {},
                                     charNameHint: charDataTX?.name || null,
                                     personaName: ctx.name1 || null,
+                                    cardPersonality: charDataTX?.personality || '',
                                 });
                             } catch (ex) {
                                 console.error('[OW] processTurn error (text completion):', ex);

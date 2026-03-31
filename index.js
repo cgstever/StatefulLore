@@ -104,7 +104,7 @@ function idbGetAll(store) {
 
 function getSessionKey() {
     const ctx = SillyTavern.getContext();
-    const chatId = ctx.getCurrentChatId?.() || 'unknown';
+    const chatId = ctx.getCurrentChatId?.() || ctx.characters?.[ctx.characterId]?.chat || 'unknown';
     // ctx.characterId is undefined in group chats; fall back to the last
     // non-user, non-system message name so each character gets its own bucket.
     let charName = ctx.characters?.[ctx.characterId]?.name;
@@ -126,7 +126,7 @@ function getPersonaKey() {
     const ctx = SillyTavern.getContext();
     // Include chatId so pill/effect state is scoped per chat, not globally per persona.
     // Base stats are re-seeded from rs.personas on turn 1 so this is safe.
-    const chatId = ctx.getCurrentChatId?.() || 'unknown';
+    const chatId = ctx.getCurrentChatId?.() || ctx.characters?.[ctx.characterId]?.chat || 'unknown';
     return `persona::${ctx.name1 || 'User'}::${chatId}`;
 }
 

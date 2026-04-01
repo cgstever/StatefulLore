@@ -366,18 +366,14 @@ function buildScenePage(pending, messages) {
             sysContent = sysContent.replace(/^Sexual Tendencies:\s*\n(?:.*\n)*?(?=\n[A-Z]|\n*$)/m, '');
             // Strip any remaining Anatomy Snapshot that survived first pass
             sysContent = sysContent.replace(/^Anatomy Snapshot:\s*\n(?:.*\n)*?(?=\n[A-Z]|\n*$)/m, '');
-            // Line-level stripping: remove lines referencing old anatomy words
-            if (pending.currentSex) {
-                const maleWords = /\bcocks?\b|\bdicks?\b|\bpenis\b|\bballs?\b|\btesticl\w*\b|\bshaft\b|\bforeskin\b|\bmanhood\b|\berection\b|\bcum\b|\bsemen\b/i;
-                const femaleWords = /\bvagina\w*\b|\bpussy\b|\bclit\w*\b|\bvulva\b|\blabia\b|\bovari\w*\b|\buterus\b|\bwomb\b/i;
-                const stripPattern = pending.currentSex === 'female' ? maleWords : pending.currentSex === 'male' ? femaleWords : null;
-                if (stripPattern) {
-                    sysContent = sysContent.split('\n').filter(line => {
-                        // Keep header lines (Name:, Age:, etc.) even if they match
-                        if (/^[A-Z][a-z]+:/.test(line.trim())) return true;
-                        return !stripPattern.test(line);
-                    }).join('\n');
-                }
+            // Line-level stripping: engine provides words to remove from card text
+            if (pending.stripWords && pending.stripWords.length) {
+                const pattern = new RegExp('\\b(' + pending.stripWords.join('|') + ')\\b', 'i');
+                sysContent = sysContent.split('\n').filter(line => {
+                    // Keep labeled header lines (Name:, Age:, etc.) even if they match
+                    if (/^[A-Z][a-z]+:/.test(line.trim())) return true;
+                    return !pattern.test(line);
+                }).join('\n');
             }
             // Collapse blanks
             sysContent = sysContent.replace(/\n{3,}/g, '\n\n').trim();
@@ -1348,7 +1344,7 @@ function saveSettings() {
                             priorityInjection:  turnResult.priorityInjection || false,
                             personaBlock:       resolveMacros(turnResult.personaBlock || null, ctx),
                             anatomyOverride:    state._card_anatomy_override || null,
-                            currentSex:         state._card_current_sex || null,
+                            stripWords:         state._card_strip_words || null,
                         };
 
                         // Also resolve macros in inject entries

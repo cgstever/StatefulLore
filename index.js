@@ -358,6 +358,28 @@ function buildScenePage(pending, messages) {
             .replace(/\n{3,}/g, '\n\n')
             .trim();
 
+        // Post-TX: replace old Appearance + Anatomy with transformed body descriptors
+        if (pending.anatomyOverride) {
+            // Strip old Appearance block
+            sysContent = sysContent.replace(/^Appearance:\s*\n(?:.*\n)*?(?=\n[A-Z]|\n*$)/m, '');
+            // Strip old Sexual Tendencies block
+            sysContent = sysContent.replace(/^Sexual Tendencies:\s*\n(?:.*\n)*?(?=\n[A-Z]|\n*$)/m, '');
+            // Strip any remaining Anatomy Snapshot that survived first pass
+            sysContent = sysContent.replace(/^Anatomy Snapshot:\s*\n(?:.*\n)*?(?=\n[A-Z]|\n*$)/m, '');
+            // Collapse blanks
+            sysContent = sysContent.replace(/\n{3,}/g, '\n\n').trim();
+            // Inject new anatomy after the Name/Age/Sex header
+            const nameBlock = sysContent.match(/^(?:Name:.*\n(?:Age:.*\n)?(?:Sex:.*\n)?)/m);
+            if (nameBlock) {
+                const insertPos = nameBlock.index + nameBlock[0].length;
+                sysContent = sysContent.substring(0, insertPos) + '\n' + pending.anatomyOverride + '\n' + sysContent.substring(insertPos);
+            } else {
+                // Fallback: prepend
+                sysContent = pending.anatomyOverride + '\n\n' + sysContent;
+            }
+            sysContent = sysContent.replace(/\n{3,}/g, '\n\n').trim();
+        }
+
         // Append any system-position inject entries to the system message
         for (const inj of (pending.inject || [])) {
             if (!inj || !inj.text || inj.position !== 'system') continue;
@@ -1312,6 +1334,7 @@ function saveSettings() {
                             recentMessageCount: turnResult.recentMessageCount || null,
                             priorityInjection:  turnResult.priorityInjection || false,
                             personaBlock:       resolveMacros(turnResult.personaBlock || null, ctx),
+                            anatomyOverride:    state._card_anatomy_override || null,
                         };
 
                         // Also resolve macros in inject entries

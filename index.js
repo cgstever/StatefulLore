@@ -130,6 +130,39 @@ function getPersonaKey() {
     return `persona::${ctx.name1 || 'User'}::${chatId}`;
 }
 
+// -- Message-based state helpers ---------------------------------------------
+
+function readMsgState() {
+    const ctx = SillyTavern.getContext();
+    const chat = ctx.chat || [];
+    for (let i = chat.length - 1; i >= 0; i--) {
+        const msg = chat[i];
+        if (!msg.is_user && !msg.is_system) {
+            return msg.variables?.[msg.swipe_id || 0]?.state ?? null;
+        }
+    }
+    return null;
+}
+
+async function writeMsgState(state) {
+    const ctx = SillyTavern.getContext();
+    const chat = ctx.chat || [];
+    for (let i = chat.length - 1; i >= 0; i--) {
+        const msg = chat[i];
+        if (!msg.is_user && !msg.is_system) {
+            msg.variables = msg.variables || {};
+            msg.variables[msg.swipe_id || 0] = {
+                ...(msg.variables[msg.swipe_id || 0] || {}),
+                state,
+            };
+            await ctx.saveChat();
+            return;
+        }
+    }
+    // Turn 1 — no AI message exists yet; state held in lastTurnResult
+    // and written when onMessageReceived fires after the first response.
+}
+
 // -- Lore module loading -----------------------------------------------------
 
 async function loadLoreFromSource(source, key) {
@@ -612,7 +645,6 @@ async function onMessageReceived(messageIndex) {
     if (!msg || msg.is_user) return;
 
     const assistantText = msg.mes || '';
-    const sessionKey = getSessionKey();
     let result;
 
     if (activeLore && typeof activeLore.handleResponse === 'function') {
@@ -631,7 +663,7 @@ async function onMessageReceived(messageIndex) {
     }
 
     if (result?.ok) {
-        await idbPut(STORE_STATE, sessionKey, result.state);
+        await writeMsgState(result.state);
         const cleaned = result.cleanedText || result.cleaned_text;
         if (cleaned && cleaned !== assistantText) {
             msg.mes = cleaned;
@@ -963,9 +995,8 @@ function clearModuleSettings() {
 // -- State management --------------------------------------------------------
 
 async function exportState() {
-    const sessionKey = getSessionKey();
     const personaKey = getPersonaKey();
-    const state = await idbGet(STORE_STATE, sessionKey);
+    const state = readMsgState();
     const persona = await idbGet(STORE_PERSONA, personaKey);
     const blob = new Blob(
         [JSON.stringify({ sessionKey, personaKey, state, persona, exportedAt: Date.now() }, null, 2)],
@@ -986,7 +1017,7 @@ async function importState() {
         if (!file) return;
         try {
             const data = JSON.parse(await file.text());
-            if (data.state) await idbPut(STORE_STATE, data.sessionKey || getSessionKey(), data.state);
+            if (data.state) await writeMsgState(data.state);
             if (data.persona) await idbPut(STORE_PERSONA, data.personaKey || getPersonaKey(), data.persona);
             alert('State imported.');
         } catch (ex) {
@@ -998,7 +1029,7 @@ async function importState() {
 
 async function clearState() {
     if (!confirm('Clear all lore state for this chat?')) return;
-    await idbPut(STORE_STATE, getSessionKey(), {});
+    await writeMsgState({});
     alert('State cleared.');
 }
 
@@ -1034,8 +1065,7 @@ async function refreshDebugPanel() {
     const panel = document.getElementById('ow-debug-panel');
     if (!panel) return;
     panel.style.display = 'block';
-    const sessionKey = getSessionKey();
-    const state = (await idbGet(STORE_STATE, sessionKey)) || {};
+    const state = readMsgState() || {};
     _renderDebugContent(panel, state, {});
 }
 
@@ -1098,8 +1128,7 @@ async function _renderDebugContent(panel, state, events) {
     });
 
     document.getElementById('ow-debug-dump-state')?.addEventListener('click', async () => {
-        const sessionKey = getSessionKey();
-        const fullState = (await idbGet(STORE_STATE, sessionKey)) || state;
+        const fullState = readMsgState() || state;
         const dump = JSON.stringify(fullState, null, 2);
         const blob = new Blob([dump], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
@@ -1227,7 +1256,7 @@ function saveSettings() {
 
         // Seed the HUD with existing state from IDB so it doesn't show "Waiting..."
         try {
-            const seedState = await idbGet(STORE_STATE, getSessionKey());
+            const seedState = readMsgState();
             if (seedState && activeLore && typeof activeLore.updateHud === 'function') {
                 activeLore.updateHud(seedState, activeLore._config);
             }
@@ -1242,7 +1271,7 @@ function saveSettings() {
         if (event_types.CHAT_CHANGED) {
             eventSource.on(event_types.CHAT_CHANGED, async () => {
                 try {
-                    const newState = await idbGet(STORE_STATE, getSessionKey());
+                    const newState = readMsgState();
                     if (activeLore && typeof activeLore.updateHud === 'function') {
                         activeLore.updateHud(newState || null, activeLore._config);
                     }
@@ -1277,7 +1306,7 @@ function saveSettings() {
                         const sessionKey = getSessionKey();
                         const personaKey = getPersonaKey();
 
-                        let state = (await idbGet(STORE_STATE, sessionKey)) || {};
+                        let state = readMsgState() || {};
                         let personaState = (await idbGet(STORE_PERSONA, personaKey)) || {};
 
                         // Build systemText from the card description directly — this is
@@ -1334,7 +1363,6 @@ function saveSettings() {
                         state = turnResult.state || state;
                         personaState = turnResult.persona_state || personaState;
 
-                        await idbPut(STORE_STATE, sessionKey, state);
                         await idbPut(STORE_PERSONA, personaKey, personaState);
 
                         lastTurnResult = { ...turnResult, _mode: 'fetch-chat' };
@@ -1447,7 +1475,7 @@ function saveSettings() {
                             const sessionKey = getSessionKey();
                             const personaKey = getPersonaKey();
 
-                            let state = (await idbGet(STORE_STATE, sessionKey)) || {};
+                            let state = readMsgState() || {};
                             let personaState = (await idbGet(STORE_PERSONA, personaKey)) || {};
 
                             // Build systemText from the card directly
@@ -1494,7 +1522,6 @@ function saveSettings() {
                                 state = turnResultTX.state || state;
                                 personaState = turnResultTX.persona_state || personaState;
 
-                                await idbPut(STORE_STATE, sessionKey, state);
                                 await idbPut(STORE_PERSONA, personaKey, personaState);
 
                                 lastTurnResult = { ...turnResultTX, _mode: 'fetch-text' };

@@ -26,12 +26,6 @@ const DEFAULTS = {
     maxSummaryTokens: 400,
 };
 
-// -- Auto-update (legacy defaults for x_change_world) -----------------------
-
-const XCHANGE_LORE_URL = 'https://raw.githubusercontent.com/cgstever/overwrite-st/main/x_change_world.js';
-const XCHANGE_VERSION_URL = 'https://raw.githubusercontent.com/cgstever/overwrite-st/main/version.json';
-const XCHANGE_LORE_KEY = 'x_change_world';
-
 // -- Runtime state -----------------------------------------------------------
 
 let settings = {};
@@ -174,11 +168,6 @@ async function importAndActivateLore(source, filename, { sourceUrl = null } = {}
         const entry = { path: serverPath, name: lore.name || key, version: lore.version || '?' };
         if (sourceUrl) entry.sourceUrl = sourceUrl;
         if (lore.versionUrl) entry.versionUrl = lore.versionUrl;
-        // Legacy fallback: tag x_change_world with its known URLs
-        if (key === XCHANGE_LORE_KEY) {
-            entry.sourceUrl = entry.sourceUrl || XCHANGE_LORE_URL;
-            entry.versionUrl = entry.versionUrl || XCHANGE_VERSION_URL;
-        }
         settings.server_lores[key] = entry;
         console.log(`[OW] Lore uploaded to ST server: ${serverPath}`);
     } catch (ex) {

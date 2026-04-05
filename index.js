@@ -35,70 +35,8 @@ const XCHANGE_LORE_KEY = 'x_change_world';
 // -- Runtime state -----------------------------------------------------------
 
 let settings = {};
-let db = null;
 let activeLore = null;
 let lastTurnResult = null;
-
-// -- IndexedDB ---------------------------------------------------------------
-
-const DB_NAME = 'overwrite';
-const DB_VERSION = 2;
-const STORE_STATE = 'session_state';
-const STORE_PERSONA = 'persona_state';
-const STORE_LORE = 'lore_modules';
-
-function openDB() {
-    return new Promise((resolve, reject) => {
-        const req = indexedDB.open(DB_NAME, DB_VERSION);
-        req.onupgradeneeded = (e) => {
-            const idb = e.target.result;
-            if (!idb.objectStoreNames.contains(STORE_STATE))
-                idb.createObjectStore(STORE_STATE, { keyPath: 'id' });
-            if (!idb.objectStoreNames.contains(STORE_PERSONA))
-                idb.createObjectStore(STORE_PERSONA, { keyPath: 'id' });
-            if (!idb.objectStoreNames.contains(STORE_LORE))
-                idb.createObjectStore(STORE_LORE, { keyPath: 'id' });
-        };
-        req.onsuccess = () => resolve(req.result);
-        req.onerror = () => reject(req.error);
-    });
-}
-
-function idbGet(store, key) {
-    return new Promise((resolve, reject) => {
-        const tx = db.transaction(store, 'readonly');
-        const req = tx.objectStore(store).get(key);
-        req.onsuccess = () => resolve(req.result?.data ?? null);
-        req.onerror = () => reject(req.error);
-    });
-}
-
-function idbPut(store, key, data) {
-    return new Promise((resolve, reject) => {
-        const tx = db.transaction(store, 'readwrite');
-        const req = tx.objectStore(store).put({ id: key, data });
-        req.onsuccess = () => resolve();
-        req.onerror = () => reject(req.error);
-    });
-}
-
-function idbDelete(store, key) {
-    return new Promise((resolve, reject) => {
-        const tx = db.transaction(store, 'readwrite');
-        const req = tx.objectStore(store).delete(key);
-        req.onsuccess = () => resolve();
-        req.onerror = () => reject(req.error);
-    });
-}
-
-function idbGetAll(store) {
-    return new Promise((resolve, reject) => {
-        const tx = db.transaction(store, 'readonly');
-        const req = tx.objectStore(store).getAll();
-        req.onsuccess = () => resolve(req.result || []);
-        req.onerror = () => reject(req.error);
-    });
-}
 
 // -- Keys --------------------------------------------------------------------
 
@@ -1190,14 +1128,6 @@ function saveSettings() {
 // -- Init --------------------------------------------------------------------
 
 (async function init() {
-    try {
-        db = await openDB();
-        console.log('[OW] IndexedDB ready');
-    } catch (ex) {
-        console.error('[OW] IndexedDB failed:', ex);
-        return;
-    }
-
     loadSettings();
 
     if (settings.server_lores && Object.keys(settings.server_lores).length > 0) {

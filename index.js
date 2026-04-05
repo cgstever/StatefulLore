@@ -38,8 +38,6 @@ let settings = {};
 let activeLore = null;
 let lastTurnResult = null;
 
-// -- Keys --------------------------------------------------------------------
-
 // -- Message-based state helpers ---------------------------------------------
 
 function readMsgState() {
@@ -48,7 +46,9 @@ function readMsgState() {
     for (let i = chat.length - 1; i >= 0; i--) {
         const msg = chat[i];
         if (!msg.is_user && !msg.is_system) {
-            return msg.variables?.[msg.swipe_id || 0]?.state ?? null;
+            const s = msg.variables?.[msg.swipe_id || 0]?.state;
+            if (s !== undefined) return s;
+            // No state on this swipe/message — keep searching backwards
         }
     }
     return null;
@@ -79,7 +79,9 @@ function readPersonaState() {
     for (let i = chat.length - 1; i >= 0; i--) {
         const msg = chat[i];
         if (!msg.is_user && !msg.is_system) {
-            return msg.variables?.[msg.swipe_id || 0]?.personaState ?? null;
+            const ps = msg.variables?.[msg.swipe_id || 0]?.personaState;
+            if (ps !== undefined) return ps;
+            // No personaState on this swipe/message — keep searching backwards
         }
     }
     return null;

@@ -234,20 +234,13 @@ async function uploadLoreToServer(source, key) {
 async function importAndActivateLore(source, filename) {
     const key = filename.replace(/\.js$/, '');
     const lore = await loadLoreFromSource(source, key);
-    await idbPut(STORE_LORE, key, {
-        source,
-        filename,
-        name: lore.name || key,
-        version: lore.version || '?',
-        importedAt: Date.now(),
-    });
     try {
         const serverPath = await uploadLoreToServer(source, key);
         settings.server_lores = settings.server_lores || {};
-        settings.server_lores[key] = serverPath;
+        settings.server_lores[key] = { path: serverPath, name: lore.name || key, version: lore.version || '?' };
         console.log(`[OW] Lore uploaded to ST server: ${serverPath}`);
     } catch (ex) {
-        console.warn('[OW] Server upload failed (lore works locally only):', ex.message);
+        console.warn('[OW] Server upload failed:', ex.message);
     }
     activeLore = lore;
     settings.active_lore = key;
@@ -265,31 +258,30 @@ async function loadLoreFromUrl(url) {
 }
 
 async function activateStoredLore(key) {
-    const stored = await idbGet(STORE_LORE, key);
-    if (!stored || !stored.source) {
-        console.warn(`[OW] No stored lore found for key: ${key}`);
+    const entry = settings.server_lores?.[key];
+    const serverPath = typeof entry === 'string' ? entry : entry?.path;
+    if (!serverPath) {
+        console.warn(`[OW] No server path found for lore: ${key}`);
         return null;
     }
-    activeLore = await loadLoreFromSource(stored.source, key);
+    const resp = await fetch(serverPath);
+    if (!resp.ok) throw new Error(`Fetch failed: ${resp.status}`);
+    const source = await resp.text();
+    activeLore = await loadLoreFromSource(source, key);
     settings.active_lore = key;
     saveSettings();
     return activeLore;
 }
 
 async function syncLoreFromServer(key, serverPath) {
-    console.log(`[OW] Syncing lore from server: ${key}`);
+    console.log(`[OW] Loading lore from server: ${key}`);
     const resp = await fetch(serverPath);
     if (!resp.ok) throw new Error(`Fetch failed: ${resp.status}`);
     const source = await resp.text();
     const lore = await loadLoreFromSource(source, key);
-    await idbPut(STORE_LORE, key, {
-        source,
-        filename: key + '.js',
-        name: lore.name || key,
-        version: lore.version || '?',
-        importedAt: Date.now(),
-    });
-    console.log(`[OW] Synced into IDB: ${key} v${lore.version || '?'}`);
+    // Upgrade legacy string entry to rich object
+    settings.server_lores[key] = { path: serverPath, name: lore.name || key, version: lore.version || '?' };
+    console.log(`[OW] Loaded from server: ${key} v${lore.version || '?'}`);
     return { lore, source };
 }
 
@@ -884,7 +876,8 @@ function bindSettingsEvents() {
         if (!key) { showLoreInfo('No active lore to reload.', 'err'); return; }
         showLoreInfo('Reloading...', '');
 
-        const serverPath = settings.server_lores?.[key];
+        const entry = settings.server_lores?.[key];
+        const serverPath = typeof entry === 'string' ? entry : entry?.path;
         if (serverPath) {
             try {
                 const resp = await fetch(serverPath);
@@ -896,26 +889,11 @@ function bindSettingsEvents() {
                 renderModuleSettings();
                 return;
             } catch (ex) {
-                console.warn('[OW] Server reload failed, trying IDB:', ex.message);
+                console.warn('[OW] Server reload failed:', ex.message);
             }
         }
 
-        const stored = await idbGet(STORE_LORE, key);
-        if (stored?.source) {
-            try {
-                activeLore = await loadLoreFromSource(stored.source, key);
-                settings.active_lore = key;
-                saveSettings();
-                await refreshLoreSelector();
-                showLoreInfo(`Reloaded from cache: ${activeLore.name || key}`, 'ok');
-                renderModuleSettings();
-                return;
-            } catch (ex) {
-                console.warn('[OW] IDB reload failed:', ex.message);
-            }
-        }
-
-        showLoreInfo('Reload failed: no source found.', 'err');
+        showLoreInfo('Reload failed: no server path found.', 'err');
     });
 
     document.getElementById('ow-remove-btn')?.addEventListener('click', handleRemoveLore);
@@ -948,13 +926,13 @@ async function refreshLoreSelector() {
     const el = document.getElementById('ow-active-select');
     if (!el) return;
     el.innerHTML = '<option value="">(none)</option>';
-    const all = await idbGetAll(STORE_LORE);
-    for (const entry of all) {
-        const d = entry.data;
+    for (const [key, entry] of Object.entries(settings.server_lores || {})) {
+        const name = typeof entry === 'string' ? key : (entry?.name || key);
+        const version = typeof entry === 'string' ? '?' : (entry?.version || '?');
         const opt = document.createElement('option');
-        opt.value = entry.id;
-        opt.textContent = `${d.name || entry.id} v${d.version || '?'}`;
-        if (entry.id === settings.active_lore) opt.selected = true;
+        opt.value = key;
+        opt.textContent = `${name} v${version}`;
+        if (key === settings.active_lore) opt.selected = true;
         el.appendChild(opt);
     }
 }
@@ -986,7 +964,6 @@ async function handleRemoveLore() {
     const key = el?.value;
     if (!key) return;
     if (!confirm(`Remove lore module "${key}"?`)) return;
-    await idbDelete(STORE_LORE, key);
     if (settings.server_lores?.[key]) {
         delete settings.server_lores[key];
     }
@@ -1224,7 +1201,9 @@ function saveSettings() {
     loadSettings();
 
     if (settings.server_lores && Object.keys(settings.server_lores).length > 0) {
-        for (const [key, serverPath] of Object.entries(settings.server_lores)) {
+        for (const [key, entry] of Object.entries(settings.server_lores)) {
+            const serverPath = typeof entry === 'string' ? entry : entry?.path;
+            if (!serverPath) continue;
             try {
                 await syncLoreFromServer(key, serverPath);
             } catch (ex) {

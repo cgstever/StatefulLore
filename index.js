@@ -210,8 +210,9 @@ async function syncLoreFromServer(key, serverPath) {
     if (!resp.ok) throw new Error(`Fetch failed: ${resp.status}`);
     const source = await resp.text();
     const lore = await loadLoreFromSource(source, key);
-    // Upgrade legacy string entry to rich object
-    settings.server_lores[key] = { path: serverPath, name: lore.name || key, version: lore.version || '?' };
+    // Upgrade legacy string entry to rich object — preserve sourceUrl/versionUrl
+    const prev = typeof settings.server_lores[key] === 'object' ? settings.server_lores[key] : {};
+    settings.server_lores[key] = { ...prev, path: serverPath, name: lore.name || key, version: lore.version || '?' };
     saveSettings();
     console.log(`[OW] Loaded from server: ${key} v${lore.version || '?'}`);
     return { lore, source };
@@ -1308,6 +1309,17 @@ function saveSettings() {
                 activeLore.updateHud(seedState, activeLore._config);
             }
         } catch (_) { /* non-critical */ }
+
+        // Force the floating status window open on boot
+        // Small delay to ensure onSettingsRendered has run and created the float
+        setTimeout(() => {
+            const floatWin = document.getElementById('xcw-float');
+            if (floatWin && floatWin.style.display === 'none') {
+                if (typeof window._xcwFloatToggle === 'function') window._xcwFloatToggle();
+            } else if (!floatWin && typeof window._xcwFloatToggle === 'function') {
+                window._xcwFloatToggle();
+            }
+        }, 500);
     }
 
     const { eventSource, event_types } = ctx;

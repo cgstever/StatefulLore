@@ -163,6 +163,35 @@ async function writeMsgState(state) {
     // and written when onMessageReceived fires after the first response.
 }
 
+function readPersonaState() {
+    const ctx = SillyTavern.getContext();
+    const chat = ctx.chat || [];
+    for (let i = chat.length - 1; i >= 0; i--) {
+        const msg = chat[i];
+        if (!msg.is_user && !msg.is_system) {
+            return msg.variables?.[msg.swipe_id || 0]?.personaState ?? null;
+        }
+    }
+    return null;
+}
+
+async function writePersonaState(personaState) {
+    const ctx = SillyTavern.getContext();
+    const chat = ctx.chat || [];
+    for (let i = chat.length - 1; i >= 0; i--) {
+        const msg = chat[i];
+        if (!msg.is_user && !msg.is_system) {
+            msg.variables = msg.variables || {};
+            msg.variables[msg.swipe_id || 0] = {
+                ...(msg.variables[msg.swipe_id || 0] || {}),
+                personaState,
+            };
+            await ctx.saveChat();
+            return;
+        }
+    }
+}
+
 // -- Lore module loading -----------------------------------------------------
 
 async function loadLoreFromSource(source, key) {
@@ -676,6 +705,14 @@ async function onMessageReceived(messageIndex) {
         if (activeLore && typeof activeLore.updateHud === 'function') {
             activeLore.updateHud(result.state, activeLore._config);
         }
+    } else if (lastTurnResult?.state) {
+        // handleResponse didn't run — persist processTurn state to the new message
+        await writeMsgState(lastTurnResult.state);
+    }
+
+    // Always persist persona state from this turn to the new AI message
+    if (lastTurnResult?._personaState !== undefined) {
+        await writePersonaState(lastTurnResult._personaState);
     }
 
     lastTurnResult = null;
@@ -995,11 +1032,10 @@ function clearModuleSettings() {
 // -- State management --------------------------------------------------------
 
 async function exportState() {
-    const personaKey = getPersonaKey();
     const state = readMsgState();
-    const persona = await idbGet(STORE_PERSONA, personaKey);
+    const persona = readPersonaState();
     const blob = new Blob(
-        [JSON.stringify({ sessionKey, personaKey, state, persona, exportedAt: Date.now() }, null, 2)],
+        [JSON.stringify({ state, persona, exportedAt: Date.now() }, null, 2)],
         { type: 'application/json' }
     );
     const a = document.createElement('a');
@@ -1018,7 +1054,7 @@ async function importState() {
         try {
             const data = JSON.parse(await file.text());
             if (data.state) await writeMsgState(data.state);
-            if (data.persona) await idbPut(STORE_PERSONA, data.personaKey || getPersonaKey(), data.persona);
+            if (data.persona) await writePersonaState(data.persona);
             alert('State imported.');
         } catch (ex) {
             alert('Import failed: ' + ex.message);
@@ -1035,20 +1071,7 @@ async function clearState() {
 
 async function clearPersonaState() {
     if (!confirm('Clear persona pill/effect state for this chat?')) return;
-    const personaKey = getPersonaKey();
-    await idbPut(STORE_PERSONA, personaKey, {});
-    // Also clear any old-format keys (persona::Name without chatId)
-    try {
-        const all = await idbGetAll(STORE_PERSONA);
-        for (const entry of all) {
-            const k = entry.id || '';
-            // Old format: persona::Name (exactly 2 segments)
-            if (k.startsWith('persona::') && k.split('::').length === 2) {
-                await idbDelete(STORE_PERSONA, k);
-                console.log('[OW] Deleted legacy persona key:', k);
-            }
-        }
-    } catch (ex) { console.warn('[OW] clearPersonaState migration:', ex); }
+    await writePersonaState({});
     alert('Persona pill state cleared.');
 }
 
@@ -1074,8 +1097,7 @@ async function _renderDebugContent(panel, state, events) {
     if (activeLore && typeof activeLore.getDebugInfo === 'function') {
         let ps = {};
         try {
-            const personaKey = getPersonaKey();
-            ps = (await idbGet(STORE_PERSONA, personaKey)) || {};
+            ps = readPersonaState() || {};
         } catch (e) { /* ignore */ }
         const raw = activeLore.getDebugInfo(state, events, activeLore._config || {}, ps);
         info = typeof raw === 'string' ? raw : JSON.stringify(raw, null, 2);
@@ -1194,18 +1216,6 @@ function saveSettings() {
     try {
         db = await openDB();
         console.log('[OW] IndexedDB ready');
-        // Migrate legacy persona keys: delete old persona::Name entries (no chatId segment)
-        // These were created before v6.4.4 and cause pill state to bleed across chats
-        try {
-            const allPersona = await idbGetAll(STORE_PERSONA);
-            for (const entry of allPersona) {
-                const k = entry.id || '';
-                if (k.startsWith('persona::') && k.split('::').length === 2) {
-                    await idbDelete(STORE_PERSONA, k);
-                    console.log('[OW] Migrated: deleted legacy persona key', k);
-                }
-            }
-        } catch (ex) { console.warn('[OW] Persona migration failed:', ex); }
     } catch (ex) {
         console.error('[OW] IndexedDB failed:', ex);
         return;
@@ -1304,10 +1314,9 @@ function saveSettings() {
                         // ── Chat completion: full pipeline ───────────────────
                         const ctx = SillyTavern.getContext();
                         const sessionKey = getSessionKey();
-                        const personaKey = getPersonaKey();
 
                         let state = readMsgState() || {};
-                        let personaState = (await idbGet(STORE_PERSONA, personaKey)) || {};
+                        let personaState = readPersonaState() || {};
 
                         // Build systemText from the card description directly — this is
                         // the authoritative source for Stats:, Name:, Sex:, etc.
@@ -1363,9 +1372,7 @@ function saveSettings() {
                         state = turnResult.state || state;
                         personaState = turnResult.persona_state || personaState;
 
-                        await idbPut(STORE_PERSONA, personaKey, personaState);
-
-                        lastTurnResult = { ...turnResult, _mode: 'fetch-chat' };
+                        lastTurnResult = { ...turnResult, _mode: 'fetch-chat', _personaState: personaState };
 
                         if (typeof activeLore.updateHud === 'function') {
                             activeLore.updateHud(state, activeLore._config);
@@ -1473,10 +1480,9 @@ function saveSettings() {
                         } else {
                             const ctx = SillyTavern.getContext();
                             const sessionKey = getSessionKey();
-                            const personaKey = getPersonaKey();
 
                             let state = readMsgState() || {};
-                            let personaState = (await idbGet(STORE_PERSONA, personaKey)) || {};
+                            let personaState = readPersonaState() || {};
 
                             // Build systemText from the card directly
                             let systemText = '';
@@ -1522,9 +1528,7 @@ function saveSettings() {
                                 state = turnResultTX.state || state;
                                 personaState = turnResultTX.persona_state || personaState;
 
-                                await idbPut(STORE_PERSONA, personaKey, personaState);
-
-                                lastTurnResult = { ...turnResultTX, _mode: 'fetch-text' };
+                                lastTurnResult = { ...turnResultTX, _mode: 'fetch-text', _personaState: personaState };
 
                                 if (typeof activeLore.updateHud === 'function') {
                                     activeLore.updateHud(state, activeLore._config);

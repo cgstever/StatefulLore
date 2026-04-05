@@ -212,6 +212,7 @@ async function syncLoreFromServer(key, serverPath) {
     const lore = await loadLoreFromSource(source, key);
     // Upgrade legacy string entry to rich object
     settings.server_lores[key] = { path: serverPath, name: lore.name || key, version: lore.version || '?' };
+    saveSettings();
     console.log(`[OW] Loaded from server: ${key} v${lore.version || '?'}`);
     return { lore, source };
 }
@@ -1180,6 +1181,7 @@ function saveSettings() {
         if (event_types.CHAT_CHANGED) {
             eventSource.on(event_types.CHAT_CHANGED, async () => {
                 try {
+                    lastTurnResult = null;
                     const newState = readMsgState();
                     if (activeLore && typeof activeLore.updateHud === 'function') {
                         activeLore.updateHud(newState || null, activeLore._config);

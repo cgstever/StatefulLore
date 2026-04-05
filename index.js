@@ -822,8 +822,15 @@ function getSettingsHtml() {
                     </select>
                 </label>
                 <input type="text" id="ow-location-custom" class="text_pole" placeholder="Type custom location..." style="width:100%;margin-bottom:6px;display:none;">
-                <label style="display:block; margin-bottom:4px;"><span>Scenario override:</span></label>
-                <textarea id="ow-scenario-override" class="text_pole" rows="3" placeholder="(blank = use card scenario)" style="width:100%;resize:vertical;margin-bottom:6px;"></textarea>
+                <label style="display:flex; align-items:center; gap:6px; margin-bottom:6px;">
+                    <span>Scene:</span>
+                    <select id="ow-scene-select" class="text_pole" style="width:100%;">
+                        <option value="">(Card Default)</option>
+                        <option value="_random">Random</option>
+                        <option value="_custom">Custom...</option>
+                    </select>
+                </label>
+                <textarea id="ow-scenario-override" class="text_pole" rows="3" placeholder="(blank = use card scenario)" style="width:100%;resize:vertical;margin-bottom:6px;display:none;"></textarea>
             </div>
         </div>
 
@@ -867,6 +874,89 @@ function bindSettingsEvents() {
     // Scene Override settings
     const locSelect = document.getElementById('ow-location-override');
     const locCustom = document.getElementById('ow-location-custom');
+    const sceneSelect = document.getElementById('ow-scene-select');
+    const scenarioEl = document.getElementById('ow-scenario-override');
+
+    // Helper: get scenes for a location from the active lore
+    function _getScenesForLocation(locValue) {
+        if (!locValue || locValue === '_custom') return [];
+        const scenes = activeLore?.data?.scenes;
+        if (!scenes) return [];
+        return scenes[locValue] || [];
+    }
+
+    // Helper: populate scene dropdown based on selected location
+    function _populateSceneDropdown() {
+        if (!sceneSelect) return;
+        const locVal = locSelect?.value || '';
+        const scenes = _getScenesForLocation(locVal);
+        // Clear existing options
+        sceneSelect.innerHTML = '';
+        // Always have Card Default
+        const defOpt = document.createElement('option');
+        defOpt.value = ''; defOpt.textContent = '(Card Default)';
+        sceneSelect.appendChild(defOpt);
+        if (scenes.length > 0) {
+            const randOpt = document.createElement('option');
+            randOpt.value = '_random'; randOpt.textContent = 'Random';
+            sceneSelect.appendChild(randOpt);
+            scenes.forEach((s, i) => {
+                const opt = document.createElement('option');
+                opt.value = String(i);
+                opt.textContent = s.name;
+                sceneSelect.appendChild(opt);
+            });
+        }
+        const custOpt = document.createElement('option');
+        custOpt.value = '_custom'; custOpt.textContent = 'Custom...';
+        sceneSelect.appendChild(custOpt);
+        // Restore saved selection
+        if (settings.sceneSelection && locVal === settings.sceneLocationKey) {
+            sceneSelect.value = settings.sceneSelection;
+        } else {
+            sceneSelect.value = '';
+        }
+        _applySceneSelection();
+    }
+
+    // Helper: apply current scene selection to scenarioOverride
+    function _applySceneSelection() {
+        if (!sceneSelect || !scenarioEl) return;
+        const val = sceneSelect.value;
+        const locVal = locSelect?.value || '';
+        const scenes = _getScenesForLocation(locVal);
+
+        if (val === '') {
+            // Card Default
+            scenarioEl.style.display = 'none';
+            scenarioEl.value = '';
+            settings.scenarioOverride = '';
+        } else if (val === '_custom') {
+            // Custom — show textarea for manual entry
+            scenarioEl.style.display = 'block';
+            // Don't clear — let user type
+        } else if (val === '_random') {
+            // Random — pick one at random
+            if (scenes.length > 0) {
+                const pick = scenes[Math.floor(Math.random() * scenes.length)];
+                scenarioEl.style.display = 'block';
+                scenarioEl.value = pick.text;
+                settings.scenarioOverride = pick.text;
+            }
+        } else {
+            // Named scene by index
+            const idx = parseInt(val, 10);
+            if (scenes[idx]) {
+                scenarioEl.style.display = 'block';
+                scenarioEl.value = scenes[idx].text;
+                settings.scenarioOverride = scenes[idx].text;
+            }
+        }
+        settings.sceneSelection = val;
+        settings.sceneLocationKey = locVal;
+        saveSettings();
+    }
+
     if (locSelect) {
         locSelect.value = settings.locationOverride || '';
         if (locSelect.value === '_custom' && locCustom) locCustom.style.display = 'block';
@@ -878,6 +968,7 @@ function bindSettingsEvents() {
                 if (locCustom) locCustom.style.display = 'none';
                 settings.locationOverride = locSelect.value;
             }
+            _populateSceneDropdown();
             saveSettings();
         });
     }
@@ -888,14 +979,21 @@ function bindSettingsEvents() {
             saveSettings();
         });
     }
-    const scenarioEl = document.getElementById('ow-scenario-override');
+    if (sceneSelect) {
+        sceneSelect.addEventListener('change', () => {
+            _applySceneSelection();
+        });
+    }
     if (scenarioEl) {
         scenarioEl.value = settings.scenarioOverride || '';
+        if (settings.sceneSelection === '_custom') scenarioEl.style.display = 'block';
         scenarioEl.addEventListener('input', () => {
             settings.scenarioOverride = scenarioEl.value;
             saveSettings();
         });
     }
+    // Initial population of scene dropdown
+    _populateSceneDropdown();
 
     const selectEl = document.getElementById('ow-active-select');
     if (selectEl) {

@@ -738,6 +738,68 @@ function getSettingsHtml() {
             </div>
         </div>
 
+        <div class="inline-drawer">
+            <div class="inline-drawer-toggle inline-drawer-header">
+                <b>Scene Override</b>
+                <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
+            </div>
+            <div class="inline-drawer-content">
+                <small style="display:block;margin-bottom:8px;opacity:0.7;">
+                    Override the card's location and scenario. Leave on "Card Default" to use what the card provides.
+                </small>
+                <label style="display:flex; align-items:center; gap:6px; margin-bottom:6px;">
+                    <span>Location:</span>
+                    <select id="ow-location-override" class="text_pole" style="width:100%;">
+                        <option value="">(Card Default)</option>
+                        <optgroup label="Residential">
+                            <option value="bedroom">Bedroom</option>
+                            <option value="bathroom">Bathroom</option>
+                            <option value="living room">Living Room</option>
+                            <option value="kitchen">Kitchen</option>
+                            <option value="penthouse">Penthouse</option>
+                        </optgroup>
+                        <optgroup label="Commercial">
+                            <option value="office">Office</option>
+                            <option value="hotel room">Hotel Room</option>
+                            <option value="club">Club</option>
+                            <option value="bar">Bar</option>
+                            <option value="restaurant">Restaurant</option>
+                            <option value="gym">Gym</option>
+                            <option value="locker room">Locker Room</option>
+                        </optgroup>
+                        <optgroup label="Academic">
+                            <option value="classroom">Classroom</option>
+                            <option value="library">Library</option>
+                            <option value="laboratory">Laboratory</option>
+                        </optgroup>
+                        <optgroup label="Fantasy">
+                            <option value="dungeon">Dungeon</option>
+                            <option value="throne room">Throne Room</option>
+                            <option value="tavern">Tavern</option>
+                            <option value="forest clearing">Forest Clearing</option>
+                            <option value="cave">Cave</option>
+                            <option value="castle chamber">Castle Chamber</option>
+                        </optgroup>
+                        <optgroup label="Outdoor">
+                            <option value="alley">Alley</option>
+                            <option value="rooftop">Rooftop</option>
+                            <option value="beach">Beach</option>
+                            <option value="park">Park</option>
+                        </optgroup>
+                        <optgroup label="Sci-Fi">
+                            <option value="space station">Space Station</option>
+                            <option value="starship bridge">Starship Bridge</option>
+                            <option value="cryo bay">Cryo Bay</option>
+                        </optgroup>
+                        <option value="_custom">Custom...</option>
+                    </select>
+                </label>
+                <input type="text" id="ow-location-custom" class="text_pole" placeholder="Type custom location..." style="width:100%;margin-bottom:6px;display:none;">
+                <label style="display:block; margin-bottom:4px;"><span>Scenario override:</span></label>
+                <textarea id="ow-scenario-override" class="text_pole" rows="3" placeholder="(blank = use card scenario)" style="width:100%;resize:vertical;margin-bottom:6px;"></textarea>
+            </div>
+        </div>
+
         <div id="ow-module-settings"></div>
     </div>`;
 }
@@ -771,6 +833,39 @@ function bindSettingsEvents() {
         maxTokensEl.addEventListener('change', () => {
             settings.maxSummaryTokens = Math.max(100, Math.min(800, parseInt(maxTokensEl.value, 10) || 400));
             maxTokensEl.value = settings.maxSummaryTokens;
+            saveSettings();
+        });
+    }
+
+    // Scene Override settings
+    const locSelect = document.getElementById('ow-location-override');
+    const locCustom = document.getElementById('ow-location-custom');
+    if (locSelect) {
+        locSelect.value = settings.locationOverride || '';
+        if (locSelect.value === '_custom' && locCustom) locCustom.style.display = 'block';
+        locSelect.addEventListener('change', () => {
+            if (locSelect.value === '_custom') {
+                if (locCustom) locCustom.style.display = 'block';
+                settings.locationOverride = locCustom?.value || '';
+            } else {
+                if (locCustom) locCustom.style.display = 'none';
+                settings.locationOverride = locSelect.value;
+            }
+            saveSettings();
+        });
+    }
+    if (locCustom) {
+        locCustom.value = (settings.locationOverride && locSelect?.value === '_custom') ? settings.locationOverride : '';
+        locCustom.addEventListener('input', () => {
+            settings.locationOverride = locCustom.value;
+            saveSettings();
+        });
+    }
+    const scenarioEl = document.getElementById('ow-scenario-override');
+    if (scenarioEl) {
+        scenarioEl.value = settings.scenarioOverride || '';
+        scenarioEl.addEventListener('input', () => {
+            settings.scenarioOverride = scenarioEl.value;
             saveSettings();
         });
     }
@@ -1274,6 +1369,10 @@ function saveSettings() {
                                 charNameHint: charData?.name || null,
                                 personaName: ctx.name1 || null,
                                 cardPersonality: charData?.personality || '',
+                                cardDescription: charData?.description || '',
+                                cardScenario: charData?.scenario || '',
+                                locationOverride: settings.locationOverride || '',
+                                scenarioOverride: settings.scenarioOverride || '',
                             });
                         } catch (ex) {
                             console.error('[OW] processTurn error:', ex);
@@ -1433,6 +1532,10 @@ function saveSettings() {
                                     charNameHint: charDataTX?.name || null,
                                     personaName: ctx.name1 || null,
                                     cardPersonality: charDataTX?.personality || '',
+                                    cardDescription: charDataTX?.description || '',
+                                    cardScenario: charDataTX?.scenario || '',
+                                    locationOverride: settings.locationOverride || '',
+                                    scenarioOverride: settings.scenarioOverride || '',
                                 });
                             } catch (ex) {
                                 console.error('[OW] processTurn error (text completion):', ex);

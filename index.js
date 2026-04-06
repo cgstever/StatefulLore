@@ -614,6 +614,16 @@ async function onMessageReceived(messageIndex) {
     if (!msg || msg.is_user) return;
 
     const assistantText = msg.mes || '';
+
+    // Find the last user message before this assistant reply (for turn log compression)
+    let userText = '';
+    for (let i = messageIndex - 1; i >= 0; i--) {
+        if (chat[i] && chat[i].is_user) {
+            userText = chat[i].mes || '';
+            break;
+        }
+    }
+
     let result;
 
     if (activeLore && typeof activeLore.handleResponse === 'function') {
@@ -621,6 +631,7 @@ async function onMessageReceived(messageIndex) {
         try {
             result = await activeLore.handleResponse({
                 assistantText,
+                userText,
                 state: lastTurnResult.state,
                 events: evts,
                 config: activeLore._config || {},

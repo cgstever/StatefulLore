@@ -165,9 +165,11 @@ async function importAndActivateLore(source, filename, { sourceUrl = null } = {}
     try {
         const serverPath = await uploadLoreToServer(source, key);
         settings.server_lores = settings.server_lores || {};
+        // Preserve existing sourceUrl/versionUrl from previous entry
+        const prev = typeof settings.server_lores[key] === 'object' ? settings.server_lores[key] : {};
         const entry = { path: serverPath, name: lore.name || key, version: lore.version || '?' };
-        if (sourceUrl) entry.sourceUrl = sourceUrl;
-        if (lore.versionUrl) entry.versionUrl = lore.versionUrl;
+        entry.sourceUrl  = sourceUrl || lore.sourceUrl || prev.sourceUrl || null;
+        entry.versionUrl = lore.versionUrl || prev.versionUrl || null;
         settings.server_lores[key] = entry;
         console.log(`[OW] Lore uploaded to ST server: ${serverPath}`);
     } catch (ex) {

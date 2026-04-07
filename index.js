@@ -765,76 +765,6 @@ function getSettingsHtml() {
                     <span>Location:</span>
                     <select id="ow-location-override" class="text_pole" style="width:100%;">
                         <option value="">(Card Default)</option>
-                        <optgroup label="Home">
-                            <option value="cramped studio apartment">Studio Apartment</option>
-                            <option value="modest suburban house">Suburban House</option>
-                            <option value="sprawling luxury estate">Luxury Estate</option>
-                            <option value="high-rise penthouse suite">Penthouse Suite</option>
-                            <option value="master bedroom">Master Bedroom</option>
-                            <option value="steamy bathroom">Bathroom</option>
-                            <option value="open-plan kitchen">Kitchen</option>
-                            <option value="private basement">Basement</option>
-                            <option value="secluded backyard pool">Pool Area</option>
-                        </optgroup>
-                        <optgroup label="Nightlife &amp; Social">
-                            <option value="dim VIP lounge in a nightclub">VIP Lounge</option>
-                            <option value="crowded dance floor">Dance Floor</option>
-                            <option value="seedy dive bar">Dive Bar</option>
-                            <option value="upscale cocktail bar">Cocktail Bar</option>
-                            <option value="private karaoke room">Karaoke Room</option>
-                            <option value="rooftop bar overlooking the city">Rooftop Bar</option>
-                            <option value="back room of a strip club">Strip Club Back Room</option>
-                        </optgroup>
-                        <optgroup label="Hospitality">
-                            <option value="cheap motel room">Motel Room</option>
-                            <option value="luxury hotel suite">Hotel Suite</option>
-                            <option value="resort cabana by the water">Resort Cabana</option>
-                            <option value="hot spring bath house">Bath House</option>
-                            <option value="private spa treatment room">Spa Room</option>
-                        </optgroup>
-                        <optgroup label="Work &amp; School">
-                            <option value="corner office with floor-to-ceiling windows">Corner Office</option>
-                            <option value="empty classroom after hours">Classroom</option>
-                            <option value="university dorm room">Dorm Room</option>
-                            <option value="quiet library study room">Library</option>
-                            <option value="sterile research laboratory">Laboratory</option>
-                            <option value="gym locker room after closing">Locker Room</option>
-                            <option value="backstage dressing room">Dressing Room</option>
-                        </optgroup>
-                        <optgroup label="Transport">
-                            <option value="back seat of a luxury sedan">Back Seat</option>
-                            <option value="private jet cabin">Private Jet</option>
-                            <option value="sleeper train compartment">Train Compartment</option>
-                            <option value="yacht master cabin">Yacht Cabin</option>
-                        </optgroup>
-                        <optgroup label="Outdoor">
-                            <option value="dark alleyway">Alley</option>
-                            <option value="secluded beach at night">Beach</option>
-                            <option value="dense forest clearing">Forest Clearing</option>
-                            <option value="rooftop overlooking the skyline">Rooftop</option>
-                            <option value="empty parking garage">Parking Garage</option>
-                            <option value="overgrown garden behind a manor">Garden</option>
-                        </optgroup>
-                        <optgroup label="Fantasy &amp; Historical">
-                            <option value="torch-lit dungeon cell">Dungeon Cell</option>
-                            <option value="opulent throne room">Throne Room</option>
-                            <option value="candlelit castle bedchamber">Castle Bedchamber</option>
-                            <option value="rowdy tavern upstairs room">Tavern Room</option>
-                            <option value="hidden cave behind a waterfall">Hidden Cave</option>
-                            <option value="alchemist workshop">Alchemist Workshop</option>
-                            <option value="temple inner sanctum">Temple Sanctum</option>
-                        </optgroup>
-                        <optgroup label="Dungeon">
-                            <option value="luxury private dungeon">Luxury Private Dungeon</option>
-                            <option value="underground concrete dungeon">Underground Concrete Dungeon</option>
-                        </optgroup>
-                        <optgroup label="Sci-Fi">
-                            <option value="orbital space station quarters">Station Quarters</option>
-                            <option value="starship captain quarters">Captain Quarters</option>
-                            <option value="cryo revival bay">Cryo Bay</option>
-                            <option value="neon-lit cyberpunk apartment">Cyberpunk Apartment</option>
-                            <option value="decontamination chamber">Decon Chamber</option>
-                        </optgroup>
                         <option value="_custom">Custom...</option>
                     </select>
                 </label>
@@ -1009,7 +939,8 @@ function bindSettingsEvents() {
             saveSettings();
         });
     }
-    // Initial population of scene dropdown
+    // Initial population of location + scene dropdowns from lore data
+    _populateLocationDropdown();
     _populateSceneDropdown();
 
     const selectEl = document.getElementById('ow-active-select');
@@ -1156,6 +1087,40 @@ async function handleRemoveLore() {
     showLoreInfo('Removed.', 'ok');
 }
 
+// Populate location dropdown from lore data categories (called after lore load/change)
+function _populateLocationDropdown() {
+    const locSelect = document.getElementById('ow-location-override');
+    if (!locSelect) return;
+    const saved = locSelect.value || settings.locationOverride || '';
+    locSelect.innerHTML = '';
+    const defOpt = document.createElement('option');
+    defOpt.value = ''; defOpt.textContent = '(Card Default)';
+    locSelect.appendChild(defOpt);
+
+    const categories = activeLore?.data?.scenes?._categories;
+    if (categories && Array.isArray(categories)) {
+        for (const cat of categories) {
+            const group = document.createElement('optgroup');
+            group.label = cat.name;
+            for (const loc of (cat.locations || [])) {
+                const opt = document.createElement('option');
+                opt.value = loc.key;
+                opt.textContent = loc.label;
+                group.appendChild(opt);
+            }
+            locSelect.appendChild(group);
+        }
+    }
+
+    const custOpt = document.createElement('option');
+    custOpt.value = '_custom'; custOpt.textContent = 'Custom...';
+    locSelect.appendChild(custOpt);
+
+    // Restore saved selection
+    locSelect.value = saved;
+    if (!locSelect.value && saved && saved !== '_custom') locSelect.value = '';
+}
+
 function renderModuleSettings() {
     const container = document.getElementById('ow-module-settings');
     if (!container) return;
@@ -1178,6 +1143,8 @@ function renderModuleSettings() {
             clearPersonaPill: clearPersonaState,
         });
     }
+    // Refresh location dropdown from new lore data
+    _populateLocationDropdown();
 }
 
 function clearModuleSettings() {

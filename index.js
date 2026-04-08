@@ -433,7 +433,7 @@ function buildScenePage(pending, messages) {
         // Normal turn — header goes in Layer 2 as scene context
         scenePage.push({
             role: 'system',
-            content: '[SCENE CONTEXT]\n' + pending.header + '\n[/SCENE CONTEXT]',
+            content: '<scene-context>\n' + pending.header + '\n</scene-context>',
         });
     }
     // On priority turns the header is held back and injected into Layer 5,
@@ -446,9 +446,9 @@ function buildScenePage(pending, messages) {
     if (summaryText && !isPriorityTurn) {
         scenePage.push({
             role: 'system',
-            content: summaryText.startsWith('[STORY SO FAR]')
+            content: summaryText.startsWith('<story-so-far>')
                 ? summaryText
-                : '[STORY SO FAR]\n' + summaryText + '\n[/STORY SO FAR]',
+                : '<story-so-far>\n' + summaryText + '\n</story-so-far>',
         });
     }
 
@@ -485,7 +485,7 @@ function buildScenePage(pending, messages) {
 
         // Prepend the director brief — suppressed on TX turns
         if (pending.brief && !isPriorityTurn) {
-            content = `[DIRECTOR]\n${pending.brief}\n[/DIRECTOR]\n\n` + content;
+            content = `<director>\n${pending.brief}\n</director>\n\n` + content;
         }
 
         // On priority turns, inject the full header as an active instruction
@@ -1569,7 +1569,7 @@ function saveSettings() {
                             if (pending.header && !isPriorityTurn) {
                                 payload.messages.unshift({
                                     role: 'system',
-                                    content: '[SCENE CONTEXT]\n' + pending.header + '\n[/SCENE CONTEXT]',
+                                    content: '<scene-context>\n' + pending.header + '\n</scene-context>',
                                 });
                             }
 
@@ -1577,7 +1577,7 @@ function saveSettings() {
                             if (pending.brief && !isPriorityTurn) {
                                 const lastUser = [...payload.messages].reverse().find(m => m.role === 'user');
                                 if (lastUser) {
-                                    lastUser.content = `[DIRECTOR]\n${pending.brief}\n[/DIRECTOR]\n\n` + lastUser.content;
+                                    lastUser.content = `<director>\n${pending.brief}\n</director>\n\n` + lastUser.content;
                                 }
                             }
 
@@ -1713,13 +1713,13 @@ function saveSettings() {
                                     if (pendingTX.header && !isPriorityTX) {
                                         assembledMessages.unshift({
                                             role: 'system',
-                                            content: '[SCENE CONTEXT]\n' + pendingTX.header + '\n[/SCENE CONTEXT]',
+                                            content: '<scene-context>\n' + pendingTX.header + '\n</scene-context>',
                                         });
                                     }
                                     if (pendingTX.brief && !isPriorityTX) {
                                         const lastUserTX = [...assembledMessages].reverse().find(m => m.role === 'user');
                                         if (lastUserTX) {
-                                            lastUserTX.content = `[DIRECTOR]\n${pendingTX.brief}\n[/DIRECTOR]\n\n` + lastUserTX.content;
+                                            lastUserTX.content = `<director>\n${pendingTX.brief}\n</director>\n\n` + lastUserTX.content;
                                         }
                                     }
                                     if (isPriorityTX && pendingTX.header) {

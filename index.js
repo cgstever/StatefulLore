@@ -439,39 +439,43 @@ function buildScenePage(pending, messages) {
     // On priority turns the header is held back and injected into Layer 5,
     // so the model treats it as an active instruction rather than background.
 
-    // --- Layer 3: Story summary (beat history) ------------------------------
-    // Suppressed on TX turns — the model only needs the transformation header.
-    if (pending.storySummary && !isPriorityTurn) {
+    // --- Layer 3: Story summary ----------------------------------------------
+    // Prefer condensedSummary (message-only deduped beats) over storySummary
+    // (state-based beat tracker). Suppressed on TX turns.
+    const summaryText = pending.condensedSummary || pending.storySummary || '';
+    if (summaryText && !isPriorityTurn) {
         scenePage.push({
             role: 'system',
-            content: pending.storySummary,
+            content: summaryText.startsWith('[STORY SO FAR]')
+                ? summaryText
+                : '[STORY SO FAR]\n' + summaryText + '\n[/STORY SO FAR]',
         });
     }
 
     // --- Layer 4: Recent messages -------------------------------------------
-    // Use the engine's recentMessageCount when provided (e.g. 1 on TX turns),
-    // otherwise fall back to the user's setting, then the default of 3.
-    const recentCount = pending.recentMessageCount
-        || settings.recentMessageCount
-        || 3;
-
-    // Gather only user/assistant messages (skip system messages).
-    const chatMessages = messages.filter(m => m.role === 'user' || m.role === 'assistant');
-
-    // We want the last `recentCount` *exchanges* (pairs).  An exchange is
-    // typically one user + one assistant message, so we keep recentCount * 2
-    // messages total.  The very last user message goes into Layer 5 instead.
-    const sliceCount = recentCount * 2;
-    const tail = chatMessages.slice(-sliceCount);
+    // Engine provides scrubbedRecentMessages (body-catalog terms removed from
+    // assistant messages to prevent echo pattern). Fall back to slicing from
+    // the full message array if the engine didn't provide them.
+    let recentForPage;
+    if (pending.scrubbedRecentMessages && pending.scrubbedRecentMessages.length > 0) {
+        recentForPage = pending.scrubbedRecentMessages.slice();
+    } else {
+        const recentCount = pending.recentMessageCount
+            || settings.recentMessageCount
+            || 3;
+        const chatMessages = messages.filter(m => m.role === 'user' || m.role === 'assistant');
+        const sliceCount = recentCount * 2;
+        recentForPage = chatMessages.slice(-sliceCount);
+    }
 
     // Separate out the current (last) user message — it goes in Layer 5.
     let currentUserMsg = null;
-    if (tail.length > 0 && tail[tail.length - 1].role === 'user') {
-        currentUserMsg = tail.pop();
+    if (recentForPage.length > 0 && recentForPage[recentForPage.length - 1].role === 'user') {
+        currentUserMsg = recentForPage.pop();
     }
 
     // Everything remaining is the dialogue history window.
-    for (const m of tail) {
+    for (const m of recentForPage) {
         scenePage.push({ role: m.role, content: m.content });
     }
 
@@ -1524,6 +1528,8 @@ function saveSettings() {
                             inject:             turnResult.inject || [],
                             scrubbed_messages:  turnResult.scrubbed_messages || null,
                             storySummary:       resolveMacros(turnResult.storySummary || null, ctx),
+                            condensedSummary:   turnResult.condensedSummary || '',
+                            scrubbedRecentMessages: turnResult.scrubbedRecentMessages || null,
                             recentMessageCount: turnResult.recentMessageCount || null,
                             priorityInjection:  turnResult.priorityInjection || false,
                             personaBlock:       resolveMacros(turnResult.personaBlock || null, ctx),
@@ -1682,6 +1688,8 @@ function saveSettings() {
                                     inject:            turnResultTX.inject || [],
                                     scrubbed_messages: turnResultTX.scrubbed_messages || null,
                                     storySummary:      resolveMacros(turnResultTX.storySummary || null, ctx),
+                                    condensedSummary:  turnResultTX.condensedSummary || '',
+                                    scrubbedRecentMessages: turnResultTX.scrubbedRecentMessages || null,
                                     recentMessageCount:turnResultTX.recentMessageCount || null,
                                     priorityInjection: turnResultTX.priorityInjection || false,
                                     personaBlock:      resolveMacros(turnResultTX.personaBlock || null, ctx),

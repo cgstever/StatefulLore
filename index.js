@@ -162,21 +162,22 @@ async function uploadLoreToServer(source, key) {
 async function importAndActivateLore(source, filename, { sourceUrl = null } = {}) {
     const key = filename.replace(/\.js$/, '');
     const lore = await loadLoreFromSource(source, key);
-    try {
-        const serverPath = await uploadLoreToServer(source, key);
+    // Activate immediately — module is ready, don't block on server upload
+    activeLore = lore;
+    settings.active_lore = key;
+    // Fire-and-forget the server upload (persistence for next startup)
+    uploadLoreToServer(source, key).then(serverPath => {
         settings.server_lores = settings.server_lores || {};
-        // Preserve existing sourceUrl/versionUrl from previous entry
         const prev = typeof settings.server_lores[key] === 'object' ? settings.server_lores[key] : {};
         const entry = { path: serverPath, name: lore.name || key, version: lore.version || '?' };
         entry.sourceUrl  = sourceUrl || lore.sourceUrl || prev.sourceUrl || null;
         entry.versionUrl = lore.versionUrl || prev.versionUrl || null;
         settings.server_lores[key] = entry;
-        console.log(`[OW] Lore uploaded to ST server: ${serverPath}`);
-    } catch (ex) {
+        saveSettings();
+        console.log(`[OW] Lore persisted to ST server: ${serverPath}`);
+    }).catch(ex => {
         console.warn('[OW] Server upload failed:', ex.message);
-    }
-    activeLore = lore;
-    settings.active_lore = key;
+    });
     saveSettings();
     return lore;
 }
@@ -998,10 +999,18 @@ function bindSettingsEvents() {
         const serverPath = typeof entry === 'string' ? entry : entry?.path;
         if (serverPath) {
             try {
+                // Reload from local ST server — skip re-upload, file is already there
                 const resp = await fetch(serverPath);
                 if (!resp.ok) throw new Error(`${resp.status}`);
                 const source = await resp.text();
-                const lore = await importAndActivateLore(source, key + '.js');
+                const lore = await loadLoreFromSource(source, key);
+                activeLore = lore;
+                // Preserve existing entry metadata
+                if (typeof entry === 'object') {
+                    entry.version = lore.version || '?';
+                    entry.name = lore.name || key;
+                }
+                saveSettings();
                 await refreshLoreSelector();
                 showLoreInfo(`Reloaded: ${lore.name || key} v${lore.version || '?'}`, 'ok');
                 renderModuleSettings();

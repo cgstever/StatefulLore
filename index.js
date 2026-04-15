@@ -1619,15 +1619,17 @@ function saveSettings() {
                         if (settings.debug) {
                             console.log('[OW] Assembled (' + payload.messages.length + ' msgs):',
                                 payload.messages.map(m => m.role + '(' + (m.content || '').length + ')').join(', '));
+                            // v2.0.1: engine now returns systemPrompt (owned by engine) in place of header
+                            const _promptForDebug = turnResult.systemPrompt || turnResult.header;
                             console.log('[OW] Turn:', {
                                 turn: state.turn,
-                                headerLen: turnResult.header?.length || 0,
+                                systemPromptLen: (_promptForDebug || '').length,
                                 briefLen: turnResult.brief?.length || 0,
                                 priority: isPriorityTurn,
                                 events: turnResult.events,
                             });
-                            if (turnResult.header) console.log('[OW] HEADER:\n' + turnResult.header);
-                            if (turnResult.brief)  console.log('[OW] BRIEF:\n'  + turnResult.brief);
+                            if (_promptForDebug) console.log('[OW] SYSTEM PROMPT:\n' + _promptForDebug);
+                            if (turnResult.brief) console.log('[OW] BRIEF:\n' + turnResult.brief);
                             updateDebugPanel(turnResult, state);
                         }
 
@@ -1763,7 +1765,9 @@ function saveSettings() {
 
                                 if (settings.debug) {
                                     console.log('[OW] Text completion rebuilt prompt (' + payload.prompt.length + ' chars)');
-                                    if (turnResultTX.header) console.log('[OW] HEADER:\n' + turnResultTX.header);
+                                    // v2.0.1: support engine systemPrompt in addition to legacy header
+                                    const _promptForDebugTX = turnResultTX.systemPrompt || turnResultTX.header;
+                                    if (_promptForDebugTX) console.log('[OW] SYSTEM PROMPT:\n' + _promptForDebugTX);
                                 }
                             }
                         }

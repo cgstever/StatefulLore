@@ -162,22 +162,24 @@ async function uploadLoreToServer(source, key) {
 async function importAndActivateLore(source, filename, { sourceUrl = null } = {}) {
     const key = filename.replace(/\.js$/, '');
     const lore = await loadLoreFromSource(source, key);
-    // Activate immediately — module is ready, don't block on server upload
     activeLore = lore;
     settings.active_lore = key;
-    // Fire-and-forget the server upload (persistence for next startup)
-    uploadLoreToServer(source, key).then(serverPath => {
+    // Persist to ST server BEFORE returning so Update/Reload reliably sees fresh bytes.
+    // Previously fire-and-forget — caused Update-then-Reload to return stale bytes if the
+    // upload hadn't committed, or to fake success if the upload silently failed.
+    try {
+        const serverPath = await uploadLoreToServer(source, key);
         settings.server_lores = settings.server_lores || {};
         const prev = typeof settings.server_lores[key] === 'object' ? settings.server_lores[key] : {};
         const entry = { path: serverPath, name: lore.name || key, version: lore.version || '?' };
         entry.sourceUrl  = sourceUrl || lore.sourceUrl || prev.sourceUrl || null;
         entry.versionUrl = lore.versionUrl || prev.versionUrl || null;
         settings.server_lores[key] = entry;
-        saveSettings();
         console.log(`[OW] Lore persisted to ST server: ${serverPath}`);
-    }).catch(ex => {
+    } catch (ex) {
         console.warn('[OW] Server upload failed:', ex.message);
-    });
+        throw new Error(`Server persistence failed: ${ex.message}`);
+    }
     saveSettings();
     return lore;
 }
@@ -234,6 +236,9 @@ async function checkForLoreUpdate(silent = false) {
         return false;
     }
 
+    // Capture the version we're upgrading FROM before any fetch — used in the success toast.
+    const priorVersion = activeLore?.version ?? null;
+
     if (!silent) showLoreInfo('Checking for updates...', '');
     try {
         // If a versionUrl is available, do a lightweight version check first
@@ -241,20 +246,21 @@ async function checkForLoreUpdate(silent = false) {
             const resp = await fetch(versionUrl + (versionUrl.includes('?') ? '&' : '?') + 't=' + Date.now());
             if (!resp.ok) throw new Error(`Version check failed: ${resp.status}`);
             const { version: remoteVersion } = await resp.json();
-            const localVersion = activeLore?.version ?? null;
 
-            if (localVersion === remoteVersion) {
-                if (!silent) showLoreInfo(`Already up to date: v${localVersion}`, 'ok');
+            if (priorVersion === remoteVersion) {
+                if (!silent) showLoreInfo(`Already up to date: v${priorVersion}`, 'ok');
                 return false;
             }
 
-            const fromStr = localVersion ? `v${localVersion}` : 'none';
+            const fromStr = priorVersion ? `v${priorVersion}` : 'none';
             showLoreInfo(`Updating lore: ${fromStr} → v${remoteVersion}…`, '');
         }
 
-        // Re-fetch the full lore from its source URL
+        // Re-fetch the full lore from its source URL — await persists the new bytes to ST server.
         await loadLoreFromUrl(sourceUrl);
-        showLoreInfo(`Updated to v${activeLore?.version || '?'} ✓`, 'ok');
+        const newVersion = activeLore?.version || '?';
+        const fromTo = priorVersion ? `v${priorVersion} → v${newVersion}` : `v${newVersion}`;
+        showLoreInfo(`Updated ${fromTo} — Reload to apply`, 'ok');
         return true;
     } catch (ex) {
         if (!silent) showLoreInfo(`Update check failed: ${ex.message}`, 'err');

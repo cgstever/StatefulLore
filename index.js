@@ -1489,6 +1489,9 @@ function saveSettings() {
                         }
                         // Append the payload system message if it adds anything not already there
                         const sysMsg = payload.messages.find(m => m.role === 'system');
+                        // v1.169.5 one-time diagnostic: dump raw ST system message for v7.0.0
+                        // prompt-redesign migration inspection. Remove in v2.0.0.
+                        console.log('[OW-DIAG v1.169.5] Raw ST sysMsg.content (length ' + (sysMsg?.content?.length || 0) + '):\n' + (sysMsg?.content || '(no system message found in payload.messages)'));
                         if (sysMsg && sysMsg.content && !systemText.includes(sysMsg.content.substring(0, 80))) {
                             systemText = systemText ? systemText + '\n' + sysMsg.content : sysMsg.content;
                         }

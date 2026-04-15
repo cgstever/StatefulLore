@@ -1504,6 +1504,16 @@ function saveSettings() {
                         const charData = ctx.characters?.[ctx.characterId];
 
                         // ── Run lore engine ──────────────────────────────────
+                        // v2.0.2: persona description fallback. ctx.persona is empty
+                        // in some ST setups where persona content is delivered via the
+                        // system message instead. Fall back to sysMsg.content when
+                        // ctx.persona is empty. Trade-off: if a user's system prompt
+                        // holds non-persona content (jailbreak / format prefs), that
+                        // content will bleed into the engine's <user> block. Acceptable
+                        // for this extension's primary audience.
+                        const _ctxPersona = ctx.persona && String(ctx.persona).trim();
+                        const _sysMsgFallback = (!_ctxPersona && sysMsg && sysMsg.content && sysMsg.content.trim()) || '';
+                        const _personaDesc = _ctxPersona || _sysMsgFallback;
                         let turnResult;
                         try {
                             turnResult = await activeLore.processTurn({
@@ -1514,7 +1524,7 @@ function saveSettings() {
                                 config: activeLore._config || {},
                                 charNameHint: charData?.name || null,
                                 personaName: ctx.name1 || null,
-                                personaDescription: ctx.persona || '',
+                                personaDescription: _personaDesc,
                                 cardPersonality: charData?.personality || '',
                                 cardDescription: charData?.description || '',
                                 cardScenario: charData?.scenario || '',

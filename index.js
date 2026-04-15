@@ -24,6 +24,11 @@ const DEFAULTS = {
     scenePageMode: true,
     recentMessageCount: 3,
     maxSummaryTokens: 400,
+    // v2.0.4: the card's first_mes (greeting) sets scene context that fights
+    // scene/scenario overrides the user configures in the extension. Stripping
+    // it from the API payload lets the extension's scene setup win. Greeting
+    // stays in the ST UI for reference.
+    skipGreetingInHistory: true,
 };
 
 // -- Runtime state -----------------------------------------------------------
@@ -740,6 +745,15 @@ function getSettingsHtml() {
                     The model receives only the character card, current state, story
                     summary, and last few messages.
                 </small>
+                <label style="margin-bottom:6px; display:flex; align-items:center; gap:6px;">
+                    <input type="checkbox" id="ow-skip-greeting">
+                    <span>Skip card greeting in history</span>
+                </label>
+                <small style="display:block;margin-bottom:8px;opacity:0.7;">
+                    Cuts the character's first_mes from the API payload so its scene
+                    context doesn't fight your extension scene/scenario overrides.
+                    Greeting stays visible in the chat UI.
+                </small>
                 <div id="ow-scene-page-options" style="margin-left:4px;">
                     <label style="display:flex; align-items:center; gap:6px; margin-bottom:4px;">
                         <span>Recent messages:</span>
@@ -812,6 +826,8 @@ function bindSettingsEvents() {
         const opts = document.getElementById('ow-scene-page-options');
         if (opts) opts.style.opacity = v ? '1' : '0.5';
     });
+    // v2.0.4: greeting-strip toggle
+    bindCheckbox('ow-skip-greeting', 'skipGreetingInHistory');
 
     const recentMsgEl = document.getElementById('ow-recent-msg-count');
     if (recentMsgEl) {
@@ -1660,6 +1676,21 @@ function saveSettings() {
                             }
                         }
 
+                        // v2.0.4: strip the card's first_mes (greeting) from the API payload
+                        // so its scene context doesn't fight extension scene/scenario overrides.
+                        // Greeting stays visible in the ST chat UI; only the generation payload
+                        // is affected. Skipped when no user message has been sent yet (chat is
+                        // just the greeting so far — model would have nothing to respond to).
+                        if (settings.skipGreetingInHistory !== false && Array.isArray(payload.messages)) {
+                            const _firstAstIdx = payload.messages.findIndex(m => m && m.role === 'assistant');
+                            if (_firstAstIdx >= 0) {
+                                const _hasUserAfter = payload.messages.slice(_firstAstIdx + 1).some(m => m && m.role === 'user');
+                                if (_hasUserAfter) {
+                                    payload.messages.splice(_firstAstIdx, 1);
+                                }
+                            }
+                        }
+
                         opts.body = JSON.stringify(payload);
 
                         if (settings.debug) {
@@ -1800,6 +1831,18 @@ function saveSettings() {
                                             content: pendingTX.header +
                                                 '\n\nWrite the full transformation scene now. Use the physical guide above as your style reference. Multiple detailed paragraphs describing each physical change. Each change gets its own paragraph. Do not write a short response.',
                                         });
+                                    }
+                                }
+
+                                // v2.0.4: strip card greeting from assembled messages before ChatML
+                                // serialization — matches the chat-completion behavior.
+                                if (settings.skipGreetingInHistory !== false && Array.isArray(assembledMessages)) {
+                                    const _firstAstIdxTX = assembledMessages.findIndex(m => m && m.role === 'assistant');
+                                    if (_firstAstIdxTX >= 0) {
+                                        const _hasUserAfterTX = assembledMessages.slice(_firstAstIdxTX + 1).some(m => m && m.role === 'user');
+                                        if (_hasUserAfterTX) {
+                                            assembledMessages.splice(_firstAstIdxTX, 1);
+                                        }
                                     }
                                 }
 

@@ -881,6 +881,33 @@ function bindSettingsEvents() {
         _applySceneSelection();
     }
 
+    // v2.0.3: fetch the card's default scenario (from charData.scenario field,
+    // falling back to parsing the "Scenario:" block in description). Used to
+    // pre-fill the Custom textarea so the user can make small edits rather
+    // than typing from scratch.
+    function _getCardDefaultScenario() {
+        try {
+            const ctx = SillyTavern.getContext();
+            const charData = ctx?.characters?.[ctx?.characterId];
+            if (!charData) return '';
+            if (charData.scenario && String(charData.scenario).trim()) {
+                return String(charData.scenario).trim();
+            }
+            const desc = charData.description || '';
+            if (!desc) return '';
+            const blocks = String(desc).split(/\n\s*\n/);
+            for (const block of blocks) {
+                const firstLine = block.split('\n')[0].trim();
+                if (/^Scenario\s*:/i.test(firstLine)) {
+                    return block.replace(/^Scenario\s*:\s*\n?/i, '').trim();
+                }
+            }
+        } catch (e) {
+            console.warn('[OW] _getCardDefaultScenario failed:', e.message);
+        }
+        return '';
+    }
+
     // Helper: apply current scene selection to scenarioOverride
     function _applySceneSelection() {
         if (!sceneSelect || !scenarioEl) return;
@@ -894,9 +921,18 @@ function bindSettingsEvents() {
             scenarioEl.value = '';
             settings.scenarioOverride = '';
         } else if (val === '_custom') {
-            // Custom — show textarea for manual entry
+            // Custom — show textarea for manual entry.
+            // v2.0.3: if the textarea is empty, pre-fill with the card's
+            // default scenario so the user can edit rather than type from
+            // scratch. Their edits save to settings.scenarioOverride.
             scenarioEl.style.display = 'block';
-            // Don't clear — let user type
+            if (!scenarioEl.value || !scenarioEl.value.trim()) {
+                const cardDefault = _getCardDefaultScenario();
+                if (cardDefault) {
+                    scenarioEl.value = cardDefault;
+                    settings.scenarioOverride = cardDefault;
+                }
+            }
         } else if (val === '_random') {
             // Random — pick one at random
             if (scenes.length > 0) {

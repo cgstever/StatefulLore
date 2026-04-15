@@ -1487,11 +1487,11 @@ function saveSettings() {
                             if (_cardData.scenario)    parts.push('Scenario: ' + _cardData.scenario);
                             systemText = parts.join('\n');
                         }
-                        // Append the payload system message if it adds anything not already there
+                        // Append the payload system message if it adds anything not already there.
+                        // v2.0.0: systemText is used by the engine for stat/card extraction only.
+                        // The model-facing system message comes exclusively from pending.systemPrompt
+                        // (engine-owned). ST's sysMsg content does NOT reach the model from here.
                         const sysMsg = payload.messages.find(m => m.role === 'system');
-                        // v1.169.5 one-time diagnostic: dump raw ST system message for v7.0.0
-                        // prompt-redesign migration inspection. Remove in v2.0.0.
-                        console.log('[OW-DIAG v1.169.5] Raw ST sysMsg.content (length ' + (sysMsg?.content?.length || 0) + '):\n' + (sysMsg?.content || '(no system message found in payload.messages)'));
                         if (sysMsg && sysMsg.content && !systemText.includes(sysMsg.content.substring(0, 80))) {
                             systemText = systemText ? systemText + '\n' + sysMsg.content : sysMsg.content;
                         }

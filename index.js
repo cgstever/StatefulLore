@@ -113,7 +113,7 @@ function _flushDebugBuffer(state) {
         }
         state._debug_dump.turn_log = _debugLogBuffer.slice();
         state._debug_dump.flushed_at = new Date().toISOString();
-        state._debug_dump.extension_version = '2.0.6';
+        state._debug_dump.extension_version = '2.0.7';
         if (_lastAssembled) {
             state._debug_dump.assembled = _lastAssembled;
         }
@@ -1807,6 +1807,10 @@ function saveSettings() {
                             scrubbedRecentMessages: turnResult.scrubbedRecentMessages || null,
                             recentMessageCount: turnResult.recentMessageCount || null,
                             priorityInjection:  turnResult.priorityInjection || false,
+                            // v2.0.7 — lore-owned priority message text. Extension stays generic;
+                            // whatever the lore puts here is what gets appended at message[-1] on
+                            // priority turns. Lore-agnostic plumbing.
+                            priorityDirective:  resolveMacros(turnResult.priorityDirective || null, ctx),
                             personaBlock:       resolveMacros(turnResult.personaBlock || null, ctx),
                             anatomyOverride:    state._card_anatomy_override || null,
                             stripWords:         state._card_strip_words || null,
@@ -1823,16 +1827,15 @@ function saveSettings() {
                             // ── Scene Page mode: full rebuild ────────────────
                             payload.messages = buildScenePage(pending, payload.messages);
 
-                            // Priority / TX turns: append write directive as the final
-                            // message so it's the absolute last thing the model sees.
-                            // v2.0.6 — engine v7.7.0+ returns content in `systemPrompt` not `header`;
-                            // fall back so the TX directive actually fires on priority turns.
-                            const _txAnchor = pending.systemPrompt || pending.header;
-                            if (isPriorityTurn && _txAnchor) {
+                            // v2.0.7 — Priority turns: append the lore-supplied priorityDirective
+                            // verbatim at message[-1] so it's the last thing the model sees.
+                            // Extension stays lore-agnostic — the lore module owns ALL the prose;
+                            // whatever it sets in turnResult.priorityDirective is what gets appended.
+                            // No directive supplied -> no append (lore's call).
+                            if (isPriorityTurn && pending.priorityDirective) {
                                 payload.messages.push({
                                     role: 'system',
-                                    content: _txAnchor +
-                                        '\n\nWrite the full transformation scene now. Use the physical guide above as your style reference. Multiple detailed paragraphs describing each physical change. Each change gets its own paragraph. Do not write a short response.',
+                                    content: pending.priorityDirective,
                                 });
                             }
                         } else {
@@ -2011,6 +2014,8 @@ function saveSettings() {
                                     scrubbedRecentMessages: turnResultTX.scrubbedRecentMessages || null,
                                     recentMessageCount:turnResultTX.recentMessageCount || null,
                                     priorityInjection: turnResultTX.priorityInjection || false,
+                                    // v2.0.7 — lore-owned priority append text (see chat-completion comment)
+                                    priorityDirective: resolveMacros(turnResultTX.priorityDirective || null, ctx),
                                     personaBlock:      resolveMacros(turnResultTX.personaBlock || null, ctx),
                                 };
 
@@ -2042,13 +2047,12 @@ function saveSettings() {
                                             lastUserTX.content = `<director>\n${pendingTX.brief}\n</director>\n\n` + lastUserTX.content;
                                         }
                                     }
-                                    // v2.0.6 — fall back to systemPrompt if header is null (engine v7.7.0+)
-                                    const _txAnchorTX = pendingTX.systemPrompt || pendingTX.header;
-                                    if (isPriorityTX && _txAnchorTX) {
+                                    // v2.0.7 — append lore-supplied priorityDirective verbatim;
+                                    // extension stays generic (no hardcoded TX prose).
+                                    if (isPriorityTX && pendingTX.priorityDirective) {
                                         assembledMessages.push({
                                             role: 'system',
-                                            content: _txAnchorTX +
-                                                '\n\nWrite the full transformation scene now. Use the physical guide above as your style reference. Multiple detailed paragraphs describing each physical change. Each change gets its own paragraph. Do not write a short response.',
+                                            content: pendingTX.priorityDirective,
                                         });
                                     }
                                 }

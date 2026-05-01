@@ -113,7 +113,7 @@ function _flushDebugBuffer(state) {
         }
         state._debug_dump.turn_log = _debugLogBuffer.slice();
         state._debug_dump.flushed_at = new Date().toISOString();
-        state._debug_dump.extension_version = '2.0.5';
+        state._debug_dump.extension_version = '2.0.6';
         if (_lastAssembled) {
             state._debug_dump.assembled = _lastAssembled;
         }
@@ -1825,10 +1825,13 @@ function saveSettings() {
 
                             // Priority / TX turns: append write directive as the final
                             // message so it's the absolute last thing the model sees.
-                            if (isPriorityTurn && pending.header) {
+                            // v2.0.6 — engine v7.7.0+ returns content in `systemPrompt` not `header`;
+                            // fall back so the TX directive actually fires on priority turns.
+                            const _txAnchor = pending.systemPrompt || pending.header;
+                            if (isPriorityTurn && _txAnchor) {
                                 payload.messages.push({
                                     role: 'system',
-                                    content: pending.header +
+                                    content: _txAnchor +
                                         '\n\nWrite the full transformation scene now. Use the physical guide above as your style reference. Multiple detailed paragraphs describing each physical change. Each change gets its own paragraph. Do not write a short response.',
                                 });
                             }
@@ -2039,10 +2042,12 @@ function saveSettings() {
                                             lastUserTX.content = `<director>\n${pendingTX.brief}\n</director>\n\n` + lastUserTX.content;
                                         }
                                     }
-                                    if (isPriorityTX && pendingTX.header) {
+                                    // v2.0.6 — fall back to systemPrompt if header is null (engine v7.7.0+)
+                                    const _txAnchorTX = pendingTX.systemPrompt || pendingTX.header;
+                                    if (isPriorityTX && _txAnchorTX) {
                                         assembledMessages.push({
                                             role: 'system',
-                                            content: pendingTX.header +
+                                            content: _txAnchorTX +
                                                 '\n\nWrite the full transformation scene now. Use the physical guide above as your style reference. Multiple detailed paragraphs describing each physical change. Each change gets its own paragraph. Do not write a short response.',
                                         });
                                     }

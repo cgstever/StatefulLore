@@ -37,6 +37,145 @@ let settings = {};
 let activeLore = null;
 let lastTurnResult = null;
 
+// -- Debug log buffer (v2.0.5) ----------------------------------------------
+// Captures one turn's worth of [OW]/[XCW]/[XR] console output + explicit
+// markers (USER_MSG, PROCESS_TURN_*, AI_RESPONSE, etc) into a per-turn array
+// that gets flushed into state._debug_dump.turn_log when state is persisted.
+// A daemon on the server side (xcw-watcher) renders these into per-character
+// .md/.log files so debugging doesn't require pasting browser console.
+
+let _debugLogBuffer = [];
+let _lastAssembled = null;  // {messages, engine} — captured per turn, flushed to state
+const _DEBUG_BUFFER_CAP = 800;
+const _DEBUG_PREFIXES = ['[OW]', '[XCW]', '[XR]'];
+
+const _origConsoleLog = console.log.bind(console);
+const _origConsoleError = console.error.bind(console);
+const _origConsoleWarn = console.warn.bind(console);
+
+function _captureLog(level, args) {
+    try {
+        const first = args[0];
+        if (typeof first !== 'string') return;
+        let matched = false;
+        for (const p of _DEBUG_PREFIXES) {
+            if (first.startsWith(p)) { matched = true; break; }
+        }
+        if (!matched) return;
+        const ts = new Date().toISOString();
+        const parts = [];
+        for (const a of args) {
+            if (typeof a === 'string') parts.push(a);
+            else {
+                try { parts.push(JSON.stringify(a)); }
+                catch (_) { parts.push(String(a)); }
+            }
+        }
+        let line = parts.join(' ');
+        if (line.length > 4000) line = line.substring(0, 4000) + '...[truncated]';
+        _debugLogBuffer.push(`${ts} ${level} ${line}`);
+        if (_debugLogBuffer.length > _DEBUG_BUFFER_CAP) {
+            _debugLogBuffer.splice(0, _debugLogBuffer.length - _DEBUG_BUFFER_CAP);
+        }
+    } catch (_) { /* never let logging crash anything */ }
+}
+
+console.log = function (...args) { _captureLog('LOG ', args); _origConsoleLog(...args); };
+console.error = function (...args) { _captureLog('ERR ', args); _origConsoleError(...args); };
+console.warn = function (...args) { _captureLog('WARN', args); _origConsoleWarn(...args); };
+
+function _resetDebugBuffer() { _debugLogBuffer = []; }
+
+function _pushDebugMarker(label, payload) {
+    try {
+        const ts = new Date().toISOString();
+        let detail = '';
+        if (payload !== undefined) {
+            if (typeof payload === 'string') {
+                detail = payload.length > 600 ? payload.substring(0, 600) + '...[truncated]' : payload;
+            } else {
+                try { detail = JSON.stringify(payload).substring(0, 600); }
+                catch (_) { detail = String(payload); }
+            }
+        }
+        _debugLogBuffer.push(`${ts} MARK ${label}${detail ? ' ' + detail : ''}`);
+        if (_debugLogBuffer.length > _DEBUG_BUFFER_CAP) {
+            _debugLogBuffer.splice(0, _debugLogBuffer.length - _DEBUG_BUFFER_CAP);
+        }
+    } catch (_) { /* swallow */ }
+}
+
+function _flushDebugBuffer(state) {
+    try {
+        if (!state || typeof state !== 'object') return;
+        if (!state._debug_dump || typeof state._debug_dump !== 'object') {
+            state._debug_dump = {};
+        }
+        state._debug_dump.turn_log = _debugLogBuffer.slice();
+        state._debug_dump.flushed_at = new Date().toISOString();
+        state._debug_dump.extension_version = '2.0.5';
+        if (_lastAssembled) {
+            state._debug_dump.assembled = _lastAssembled;
+        }
+    } catch (_) { /* swallow */ }
+}
+
+// v2.0.5 — build the rich per-turn capture used by both completion modes.
+function _buildAssembledCapture(opts) {
+    try {
+        const {
+            mode, payload, turnResult, pending, isPriorityTurn,
+            systemText, messagesIn, charData, ctx, _personaDesc,
+            personaState, settings, promptString,
+        } = opts;
+        const _trClean = {};
+        for (const k of Object.keys(turnResult || {})) {
+            if (k === 'state' || k === 'persona_state') continue;
+            _trClean[k] = turnResult[k];
+        }
+        const cap = {
+            captured_at: new Date().toISOString(),
+            mode: mode,
+            priority: !!isPriorityTurn,
+            messages: (payload.messages || []).map(m => ({ role: m.role, content: m.content || '' })),
+            turnResult: _trClean,
+            processTurn_inputs: {
+                systemText: systemText || '',
+                messages_in: (messagesIn || []).map(m => ({ role: m.role, content_chars: (m.content || '').length })),
+                charNameHint: charData?.name || null,
+                personaName: ctx?.name1 || null,
+                personaDescription: _personaDesc || '',
+                cardPersonality: charData?.personality || '',
+                cardDescription_chars: (charData?.description || '').length,
+                cardScenario: charData?.scenario || '',
+                locationOverride: settings?.locationOverride || '',
+                scenarioOverride: settings?.scenarioOverride || '',
+            },
+            pending: pending || null,
+            settings_snapshot: {
+                scenePageMode: settings?.scenePageMode,
+                recentMessageCount: settings?.recentMessageCount,
+                maxSummaryTokens: settings?.maxSummaryTokens,
+                debug: settings?.debug,
+                skipGreetingInHistory: settings?.skipGreetingInHistory,
+                locationOverride: settings?.locationOverride || null,
+                scenarioOverride: settings?.scenarioOverride || null,
+                active_lore: settings?.active_lore,
+            },
+            personaState: personaState || null,
+            engine_summary: {
+                systemPrompt_chars: (turnResult?.systemPrompt || '').length,
+                header_chars:       (turnResult?.header || '').length,
+                brief_chars:        (turnResult?.brief || '').length,
+                inject_count:       (turnResult?.inject || []).length,
+                events_keys:        turnResult?.events ? Object.keys(turnResult.events) : [],
+            },
+        };
+        if (promptString) cap.prompt_string = promptString;
+        return cap;
+    } catch (_) { return null; }
+}
+
 // -- Message-based state helpers ---------------------------------------------
 
 function readMsgState() {
@@ -107,6 +246,7 @@ async function writePersonaState(personaState) {
 async function writeTurnState(state, personaState) {
     const ctx = SillyTavern.getContext();
     const chat = ctx.chat || [];
+    _flushDebugBuffer(state);
     for (let i = chat.length - 1; i >= 0; i--) {
         const msg = chat[i];
         if (!msg.is_user && !msg.is_system) {
@@ -646,10 +786,15 @@ async function onMessageReceived(messageIndex) {
         }
     }
 
+    // v2.0.5 — capture the AI response and surrounding handleResponse activity
+    _pushDebugMarker('AI_RESPONSE', { chars: assistantText.length, preview: assistantText.substring(0, 300) });
+
     let result;
 
     if (activeLore && typeof activeLore.handleResponse === 'function') {
         const evts = lastTurnResult.events || {};
+        const _hrStart = performance.now ? performance.now() : Date.now();
+        _pushDebugMarker('HANDLE_RESPONSE_START');
         try {
             result = await activeLore.handleResponse({
                 assistantText,
@@ -659,10 +804,30 @@ async function onMessageReceived(messageIndex) {
                 config: activeLore._config || {},
             });
             if (result) result.ok = true;
+            _pushDebugMarker('HANDLE_RESPONSE_DONE', {
+                ms: Math.round(((performance.now ? performance.now() : Date.now()) - _hrStart) * 1000) / 1000,
+                cleaned_chars: (result?.cleanedText || result?.cleaned_text || '').length || null,
+            });
         } catch (ex) {
             console.error('[OW] handleResponse error:', ex);
+            _pushDebugMarker('HANDLE_RESPONSE_ERROR', String(ex && ex.stack || ex));
         }
     }
+
+    // v2.0.5 — capture handleResponse outcome before flushing state
+    try {
+        if (_lastAssembled) {
+            _lastAssembled.handle_response = {
+                ok: !!result?.ok,
+                assistantText_chars: assistantText.length,
+                assistantText: assistantText,
+                cleanedText: result?.cleanedText || result?.cleaned_text || null,
+                cleanedText_changed: !!(result && (result.cleanedText || result.cleaned_text) &&
+                                       (result.cleanedText || result.cleaned_text) !== assistantText),
+                full_result_keys: result ? Object.keys(result) : [],
+            };
+        }
+    } catch (_) { /* swallow */ }
 
     if (result?.ok) {
         await writeTurnState(result.state, lastTurnResult?._personaState);
@@ -1521,8 +1686,21 @@ function saveSettings() {
                         // ── Chat completion: full pipeline ───────────────────
                         const ctx = SillyTavern.getContext();
 
+                        // v2.0.5 — start a fresh log buffer for this turn
+                        _resetDebugBuffer();
+                        _lastAssembled = null;
+                        _pushDebugMarker('TURN_START', { mode: 'chat-completion' });
+
                         let state = readMsgState() || {};
                         let personaState = readPersonaState() || {};
+
+                        // v2.0.5 — capture the user message that prompted this turn
+                        try {
+                            const lastUser = (ctx.chat || []).slice().reverse().find(m => m && m.is_user);
+                            if (lastUser && lastUser.mes) {
+                                _pushDebugMarker('USER_MSG', lastUser.mes);
+                            }
+                        } catch (_) { /* swallow */ }
 
                         // Build systemText from the card description directly — this is
                         // the authoritative source for Stats:, Name:, Sex:, etc.
@@ -1567,6 +1745,8 @@ function saveSettings() {
                         const _sysMsgFallback = (!_ctxPersona && sysMsg && sysMsg.content && sysMsg.content.trim()) || '';
                         const _personaDesc = _ctxPersona || _sysMsgFallback;
                         let turnResult;
+                        const _ptStart = performance.now ? performance.now() : Date.now();
+                        _pushDebugMarker('PROCESS_TURN_START');
                         try {
                             turnResult = await activeLore.processTurn({
                                 systemText,
@@ -1585,13 +1765,24 @@ function saveSettings() {
                             });
                         } catch (ex) {
                             console.error('[OW] processTurn error:', ex);
+                            _pushDebugMarker('PROCESS_TURN_ERROR', String(ex && ex.stack || ex));
                             return _origFetch.apply(this, args);
                         }
 
+                        const _ptMs = Math.round(((performance.now ? performance.now() : Date.now()) - _ptStart) * 1000) / 1000;
                         if (!turnResult) {
+                            _pushDebugMarker('PROCESS_TURN_PASSTHROUGH', { ms: _ptMs });
                             if (settings.debug) console.log('[OW] processTurn returned null — passthrough');
                             return _origFetch.apply(this, args);
                         }
+                        _pushDebugMarker('PROCESS_TURN_DONE', {
+                            ms: _ptMs,
+                            brief_chars: (turnResult.brief || '').length,
+                            header_chars: (turnResult.header || '').length,
+                            system_prompt_chars: (turnResult.systemPrompt || '').length,
+                            inject_count: (turnResult.inject || []).length,
+                            events: turnResult.events ? Object.keys(turnResult.events) : [],
+                        });
 
                         state = turnResult.state || state;
                         personaState = turnResult.persona_state || personaState;
@@ -1693,6 +1884,25 @@ function saveSettings() {
 
                         opts.body = JSON.stringify(payload);
 
+                        // v2.0.5 — always log assembled prompt size to debug buffer (not gated on settings.debug)
+                        _pushDebugMarker('PROMPT_ASSEMBLED', {
+                            msg_count: payload.messages.length,
+                            total_chars: payload.messages.reduce((n, m) => n + (m.content || '').length, 0),
+                            priority: isPriorityTurn,
+                            roles: payload.messages.map(m => m.role + '(' + (m.content || '').length + ')'),
+                        });
+
+                        // v2.0.5 — stash EVERYTHING for off-device debugging.
+                        // Persisted into state._debug_dump.assembled by _flushDebugBuffer at saveChat.
+                        _lastAssembled = _buildAssembledCapture({
+                            mode: 'chat-completion',
+                            payload, turnResult, pending,
+                            isPriorityTurn,
+                            systemText, messagesIn: messages,
+                            charData, ctx, _personaDesc,
+                            personaState, settings,
+                        });
+
                         if (settings.debug) {
                             console.log('[OW] Assembled (' + payload.messages.length + ' msgs):',
                                 payload.messages.map(m => m.role + '(' + (m.content || '').length + ')').join(', '));
@@ -1716,6 +1926,10 @@ function saveSettings() {
                         // using its own template. We discard that and rebuild from
                         // payload.messages ourselves using ChatML, giving us the same
                         // header injection control as in chat completion mode.
+                        // v2.0.5 — fresh debug buffer for this turn
+                        _resetDebugBuffer();
+                        _lastAssembled = null;
+                        _pushDebugMarker('TURN_START', { mode: 'text-completion' });
                         if (settings.debug) console.log('[OW] Text completion detected — rebuilding prompt');
 
                         if (!payload.messages || !Array.isArray(payload.messages)) {
@@ -1851,6 +2065,27 @@ function saveSettings() {
                                 // Remove messages array so the backend uses our prompt string
                                 delete payload.messages;
                                 opts.body = JSON.stringify(payload);
+
+                                // v2.0.5 — capture text-completion prompt for off-device debugging
+                                _pushDebugMarker('PROMPT_ASSEMBLED', {
+                                    mode: 'text-completion',
+                                    msg_count: assembledMessages.length,
+                                    prompt_chars: payload.prompt.length,
+                                    priority: isPriorityTX,
+                                });
+                                _lastAssembled = _buildAssembledCapture({
+                                    mode: 'text-completion',
+                                    payload: { messages: assembledMessages },
+                                    turnResult: turnResultTX,
+                                    pending: pendingTX,
+                                    isPriorityTurn: isPriorityTX,
+                                    systemText: systemText,
+                                    messagesIn: messagesTX,
+                                    charData: charDataTX,
+                                    ctx, _personaDesc: ctx.persona || '',
+                                    personaState, settings,
+                                    promptString: payload.prompt,
+                                });
 
                                 if (settings.debug) {
                                     console.log('[OW] Text completion rebuilt prompt (' + payload.prompt.length + ' chars)');

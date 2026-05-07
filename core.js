@@ -1760,6 +1760,7 @@ function saveSettings() {
                                 cardPersonality: charData?.personality || '',
                                 cardDescription: charData?.description || '',
                                 cardScenario: charData?.scenario || '',
+                                cardTags: charData?.tags || [],
                                 locationOverride: settings.locationOverride || '',
                                 scenarioOverride: settings.scenarioOverride || '',
                             });
@@ -1984,6 +1985,7 @@ function saveSettings() {
                                     cardPersonality: charDataTX?.personality || '',
                                     cardDescription: charDataTX?.description || '',
                                     cardScenario: charDataTX?.scenario || '',
+                                    cardTags: charDataTX?.tags || [],
                                     locationOverride: settings.locationOverride || '',
                                     scenarioOverride: settings.scenarioOverride || '',
                                 });

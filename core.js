@@ -113,7 +113,7 @@ function _flushDebugBuffer(state) {
         }
         state._debug_dump.turn_log = _debugLogBuffer.slice();
         state._debug_dump.flushed_at = new Date().toISOString();
-        state._debug_dump.extension_version = '2.0.8';
+        state._debug_dump.extension_version = '2.0.10';
         if (_lastAssembled) {
             state._debug_dump.assembled = _lastAssembled;
         }
@@ -178,6 +178,20 @@ function _buildAssembledCapture(opts) {
 
 // -- Message-based state helpers ---------------------------------------------
 
+// v2.0.10 — DEEP-CLONE state on read. Prior versions returned a reference to
+// the stored state object, which meant every swipe of a turn (and even prior
+// turns' state) all ended up sharing the same mutable object. Result: when
+// processTurn mutated `state` during swipe N, the mutation propagated back to
+// every other swipe slot's saved state. Once chat.json serialized, all swipes
+// looked identical — the body_modifier reroll worked at runtime but never
+// stuck per-slot. Cloning forces each call to start with a fresh independent
+// state and write back its own snapshot.
+function _cloneState(s) {
+    if (s == null) return s;
+    try { return JSON.parse(JSON.stringify(s)); }
+    catch (_) { return s; }  // fall back to shared ref if non-serializable (extremely rare)
+}
+
 function readMsgState() {
     const ctx = SillyTavern.getContext();
     const chat = ctx.chat || [];
@@ -185,7 +199,7 @@ function readMsgState() {
         const msg = chat[i];
         if (!msg.is_user && !msg.is_system) {
             const s = msg.variables?.[msg.swipe_id || 0]?.state;
-            if (s !== undefined) return s;
+            if (s !== undefined) return _cloneState(s);
             // No state on this swipe/message — keep searching backwards
         }
     }
@@ -218,7 +232,7 @@ function readPersonaState() {
         const msg = chat[i];
         if (!msg.is_user && !msg.is_system) {
             const ps = msg.variables?.[msg.swipe_id || 0]?.personaState;
-            if (ps !== undefined) return ps;
+            if (ps !== undefined) return _cloneState(ps);
             // No personaState on this swipe/message — keep searching backwards
         }
     }

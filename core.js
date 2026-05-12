@@ -113,7 +113,7 @@ function _flushDebugBuffer(state) {
         }
         state._debug_dump.turn_log = _debugLogBuffer.slice();
         state._debug_dump.flushed_at = new Date().toISOString();
-        state._debug_dump.extension_version = '2.0.10';
+        state._debug_dump.extension_version = '2.0.11';
         if (_lastAssembled) {
             state._debug_dump.assembled = _lastAssembled;
         }
@@ -218,6 +218,12 @@ async function writeMsgState(state) {
                 state,
             };
             await ctx.saveChat();
+            // v2.0.11 — refresh HUD on every save (see writeTurnState comment)
+            try {
+                if (activeLore && typeof activeLore.updateHud === 'function') {
+                    activeLore.updateHud(state, activeLore._config);
+                }
+            } catch (_) { /* HUD refresh is best-effort */ }
             return;
         }
     }
@@ -257,6 +263,11 @@ async function writePersonaState(personaState) {
 }
 
 // Write both state and personaState in a single saveChat call
+// v2.0.11 — also refresh the HUD here. After v2.0.10's clone-on-read, the HUD
+// holds a snapshot reference; without an explicit refresh on every save, any
+// turn whose updateHud() call in the fetch interceptor was skipped (errors,
+// unusual paths) leaves the HUD frozen on the prior clone. Doing it here is
+// the catch-all — every successful state write also pings the HUD.
 async function writeTurnState(state, personaState) {
     const ctx = SillyTavern.getContext();
     const chat = ctx.chat || [];
@@ -271,6 +282,11 @@ async function writeTurnState(state, personaState) {
                 personaState,
             };
             await ctx.saveChat();
+            try {
+                if (activeLore && typeof activeLore.updateHud === 'function') {
+                    activeLore.updateHud(state, activeLore._config);
+                }
+            } catch (_) { /* HUD refresh is best-effort */ }
             return;
         }
     }

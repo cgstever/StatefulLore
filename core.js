@@ -113,7 +113,7 @@ function _flushDebugBuffer(state) {
         }
         state._debug_dump.turn_log = _debugLogBuffer.slice();
         state._debug_dump.flushed_at = new Date().toISOString();
-        state._debug_dump.extension_version = '2.0.12';
+        state._debug_dump.extension_version = '2.0.13';
         if (_lastAssembled) {
             state._debug_dump.assembled = _lastAssembled;
         }
@@ -198,9 +198,31 @@ function readMsgState() {
     for (let i = chat.length - 1; i >= 0; i--) {
         const msg = chat[i];
         if (!msg.is_user && !msg.is_system) {
-            const s = msg.variables?.[msg.swipe_id || 0]?.state;
-            if (s !== undefined) return _cloneState(s);
-            // No state on this swipe/message — keep searching backwards
+            // v2.0.13 — on swipe N, msg.swipe_id is N but msg.variables[N] doesn't
+            // exist yet (we're about to generate it). The previous code returned
+            // undefined and walked back to the PRIOR AI message's state — whose
+            // `_last_chat_msg_count` is stale → `isRegen` evaluated false →
+            // processTurn re-ran full turn each swipe → turn counter incremented
+            // and arousal compounded.
+            //
+            // Fix: walk the CURRENT msg's variables slots from highest down,
+            // returning the most recent completed swipe's state. That state's
+            // `_last_chat_msg_count` matches current chatMsgCount → isRegen=true
+            // → processTurn runs regen branch → no turn increment, no arousal
+            // mutation. TX-turn body_modifier reroll still works because the
+            // regen branch resets `resolved_body` + `card_body` and re-runs
+            // buildTransformationGuidance (which contains the reroll RNG).
+            if (msg.variables && typeof msg.variables === 'object') {
+                const slotKeys = Object.keys(msg.variables)
+                    .map(k => parseInt(k, 10))
+                    .filter(k => !isNaN(k))
+                    .sort((a, b) => b - a);  // newest swipe first
+                for (const k of slotKeys) {
+                    const s = msg.variables[k]?.state;
+                    if (s !== undefined) return _cloneState(s);
+                }
+            }
+            // No state on any slot of this AI msg — keep searching backwards
         }
     }
     return null;

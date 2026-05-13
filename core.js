@@ -113,7 +113,7 @@ function _flushDebugBuffer(state) {
         }
         state._debug_dump.turn_log = _debugLogBuffer.slice();
         state._debug_dump.flushed_at = new Date().toISOString();
-        state._debug_dump.extension_version = '2.0.11';
+        state._debug_dump.extension_version = '2.0.12';
         if (_lastAssembled) {
             state._debug_dump.assembled = _lastAssembled;
         }
@@ -861,6 +861,10 @@ async function onMessageReceived(messageIndex) {
 
     if (result?.ok) {
         await writeTurnState(result.state, lastTurnResult?._personaState);
+        // v2.0.12 — expose to window so engine HUD live-state read can find it
+        try {
+            if (typeof window !== 'undefined') window._owLastTurnState = result.state;
+        } catch (_) { /* non-critical */ }
         const cleaned = result.cleanedText || result.cleaned_text;
         if (cleaned && cleaned !== assistantText) {
             msg.mes = cleaned;
@@ -1820,6 +1824,14 @@ function saveSettings() {
 
                         lastTurnResult = { ...turnResult, _mode: 'fetch-chat', _personaState: personaState };
 
+                        // v2.0.12 — expose post-processTurn state on window so the engine's
+                        // HUD live-state read can find it even before writeTurnState has
+                        // persisted it to chat variables. Without this, turn 1 shows
+                        // "Waiting for first turn..." until the AI response is saved.
+                        try {
+                            if (typeof window !== 'undefined') window._owLastTurnState = state;
+                        } catch (_) { /* non-critical */ }
+
                         if (typeof activeLore.updateHud === 'function') {
                             activeLore.updateHud(state, activeLore._config);
                         }
@@ -2029,6 +2041,11 @@ function saveSettings() {
                                 personaState = turnResultTX.persona_state || personaState;
 
                                 lastTurnResult = { ...turnResultTX, _mode: 'fetch-text', _personaState: personaState };
+
+                                // v2.0.12 — see chat-completion path above for rationale
+                                try {
+                                    if (typeof window !== 'undefined') window._owLastTurnState = state;
+                                } catch (_) { /* non-critical */ }
 
                                 if (typeof activeLore.updateHud === 'function') {
                                     activeLore.updateHud(state, activeLore._config);

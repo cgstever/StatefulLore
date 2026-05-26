@@ -113,11 +113,95 @@ function _flushDebugBuffer(state) {
         }
         state._debug_dump.turn_log = _debugLogBuffer.slice();
         state._debug_dump.flushed_at = new Date().toISOString();
-        state._debug_dump.extension_version = '2.0.13';
+        state._debug_dump.extension_version = '2.0.14';
         if (_lastAssembled) {
             state._debug_dump.assembled = _lastAssembled;
         }
     } catch (_) { /* swallow */ }
+}
+
+// v2.0.14 — write per-turn debug payload to a sidecar file outside the chat log.
+// Engine _xrebuild (full shadow ~165KB) and extension _debug_dump.assembled (full
+// prompt capture ~140KB) together bloat each chat message snapshot by ~310KB.
+// ST reloads the entire chat JSONL on every turn, so historical debug accumulates
+// linear slowdown. Move them to per-turn files under chats_debug/ which ST never
+// reads, then strip from state before saveChat.
+//
+// On upload failure, do NOT strip — fall back to the old behavior (debug stays in
+// main JSONL). Zero data loss either way; the chat just stays slow that turn.
+async function _writeSidecarDebug(state) {
+    try {
+        if (!state || typeof state !== 'object') return;
+        const hasShadow = !!state._xrebuild;
+        const hasAssembled = !!(state._debug_dump && state._debug_dump.assembled);
+        if (!hasShadow && !hasAssembled) return;
+
+        const ctx = SillyTavern.getContext();
+        const charName = ctx?.characters?.[ctx.characterId]?.name || ctx?.name2 || 'Unknown';
+
+        // Chat ID resolver — try ST APIs, fall back to first-message send_date
+        // (unique-per-chat, deterministic across reloads, safe for filenames).
+        let chatId = null;
+        try {
+            if (typeof ctx.getCurrentChatId === 'function') chatId = ctx.getCurrentChatId();
+            if (!chatId && typeof globalThis.getCurrentChatId === 'function') chatId = globalThis.getCurrentChatId();
+            if (!chatId && ctx.chat_metadata && ctx.chat_metadata.chat_id_hash) chatId = String(ctx.chat_metadata.chat_id_hash);
+            if (!chatId && Array.isArray(ctx.chat) && ctx.chat.length > 0 && ctx.chat[0] && ctx.chat[0].send_date) {
+                chatId = String(ctx.chat[0].send_date);
+            }
+        } catch (_) { /* ignore */ }
+        if (!chatId) {
+            console.warn('[XCW-sidecar] No chat ID — skipping sidecar (debug stays in main JSONL this turn)');
+            return;
+        }
+
+        const turn = (state.turn != null) ? state.turn
+                   : (state._xrebuild && state._xrebuild.turn != null) ? state._xrebuild.turn
+                   : 0;
+
+        const payload = {
+            captured_at: new Date().toISOString(),
+            character: charName,
+            chat_id: chatId,
+            turn: turn,
+            engine_version: state.engine_version || null,
+            _xrebuild: state._xrebuild || null,
+            _debug_dump_assembled: (state._debug_dump && state._debug_dump.assembled) || null,
+        };
+
+        const safe = (s) => String(s).replace(/[^A-Za-z0-9._-]/g, '_');
+        const turnStr = String(turn).padStart(4, '0');
+        // Note: /api/files/upload writes to data/<user>/user/files/<name>.
+        // Nested paths are accepted; ST creates the directory tree.
+        const filename = `chats_debug/${safe(charName)}/${safe(chatId)}/turn_${turnStr}.json`;
+
+        const headers = ctx.getRequestHeaders();
+        const body = JSON.stringify(payload);
+        const data = btoa(unescape(encodeURIComponent(body)));
+
+        const resp = await fetch('/api/files/upload', {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ name: filename, data }),
+        });
+
+        if (!resp.ok) {
+            console.warn('[XCW-sidecar] Upload failed:', resp.status, '— keeping debug in main JSONL (fallback)');
+            return;
+        }
+
+        // Upload succeeded — strip the heavy fields from state so saveChat
+        // writes a small line. _xrebuild_log stays (small rolling buffer).
+        delete state._xrebuild;
+        if (state._debug_dump) {
+            delete state._debug_dump.assembled;
+            state._debug_dump.sidecar_turn = turn;
+            state._debug_dump.sidecar_file = filename;
+        }
+    } catch (e) {
+        console.error('[XCW-sidecar] Failed:', e && e.message ? e.message : e);
+        // Don't throw — sidecar failure should never break a chat turn.
+    }
 }
 
 // v2.0.5 — build the rich per-turn capture used by both completion modes.
@@ -294,6 +378,11 @@ async function writeTurnState(state, personaState) {
     const ctx = SillyTavern.getContext();
     const chat = ctx.chat || [];
     _flushDebugBuffer(state);
+    // v2.0.14 — offload heavy debug fields to per-turn sidecar file BEFORE saveChat.
+    // Strips state._xrebuild and state._debug_dump.assembled on successful upload,
+    // dropping ~310KB/turn of bloat from the chat JSONL. Falls back to old behavior
+    // (debug stays in main file) if upload fails. Never throws.
+    await _writeSidecarDebug(state);
     for (let i = chat.length - 1; i >= 0; i--) {
         const msg = chat[i];
         if (!msg.is_user && !msg.is_system) {

@@ -113,7 +113,7 @@ function _flushDebugBuffer(state) {
         }
         state._debug_dump.turn_log = _debugLogBuffer.slice();
         state._debug_dump.flushed_at = new Date().toISOString();
-        state._debug_dump.extension_version = '2.0.14';
+        state._debug_dump.extension_version = '2.0.15';
         if (_lastAssembled) {
             state._debug_dump.assembled = _lastAssembled;
         }
@@ -171,9 +171,14 @@ async function _writeSidecarDebug(state) {
 
         const safe = (s) => String(s).replace(/[^A-Za-z0-9._-]/g, '_');
         const turnStr = String(turn).padStart(4, '0');
-        // Note: /api/files/upload writes to data/<user>/user/files/<name>.
-        // Nested paths are accepted; ST creates the directory tree.
-        const filename = `chats_debug/${safe(charName)}/${safe(chatId)}/turn_${turnStr}.json`;
+        // IMPORTANT: ST's /api/files/upload validates the name with
+        // validateAssetFileName (src/endpoints/assets.js): the regex
+        // /^[a-zA-Z0-9_\-.]+$/ REJECTS any '/', so a nested name 400s and the
+        // upload silently fails (debug falls back inline -> chat keeps bloating).
+        // VERIFIED against the live validator (engine/_validate_name_test.mjs).
+        // So use a FLAT name (no slashes) encoding char + chat + turn. Lands at
+        // data/<user>/user/files/. _pull_logs.py reads this flat name.
+        const filename = `xcwdbg_${safe(charName)}_${safe(chatId)}_turn_${turnStr}.json`;
 
         const headers = ctx.getRequestHeaders();
         const body = JSON.stringify(payload);

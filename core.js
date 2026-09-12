@@ -29,6 +29,10 @@ const DEFAULTS = {
     // it from the API payload lets the extension's scene setup win. Greeting
     // stays in the ST UI for reference.
     skipGreetingInHistory: true,
+    // v2.1.1: open the active lore's floating HUD automatically on startup.
+    // True keeps the long-standing behaviour; turn it off if you'd rather open
+    // the panel yourself from the Float button.
+    autoOpenHud: true,
 };
 
 // -- Runtime state -----------------------------------------------------------
@@ -1102,6 +1106,14 @@ function getSettingsHtml() {
                     summary, and last few messages.
                 </small>
                 <label style="margin-bottom:6px; display:flex; align-items:center; gap:6px;">
+                    <input type="checkbox" id="ow-auto-open-hud">
+                    <span>Auto-open HUD on startup</span>
+                </label>
+                <small style="display:block;margin-bottom:8px;opacity:0.7;">
+                    Opens the active lore module's floating panel when SillyTavern
+                    loads. Turn it off to open it yourself with the Float button.
+                </small>
+                <label style="margin-bottom:6px; display:flex; align-items:center; gap:6px;">
                     <input type="checkbox" id="ow-skip-greeting">
                     <span>Skip card greeting in history</span>
                 </label>
@@ -1183,6 +1195,9 @@ function bindSettingsEvents() {
         if (opts) opts.style.opacity = v ? '1' : '0.5';
     });
     // v2.0.4: greeting-strip toggle
+    bindCheckbox('ow-auto-open-hud', 'autoOpenHud', (v) => {
+        if (v) openActiveFloat();   // tick it and the panel appears straight away
+    });
     bindCheckbox('ow-skip-greeting', 'skipGreetingInHistory');
 
     const recentMsgEl = document.getElementById('ow-recent-msg-count');
@@ -1570,12 +1585,66 @@ function renderModuleSettings() {
             </div>
         </div>`;
     if (typeof activeLore.onSettingsRendered === 'function') {
+        const _before = _floatSnapshot();
         activeLore.onSettingsRendered(activeLore._config || {}, {
             clearPersonaPill: clearPersonaState,
         });
+        _rememberFloat(activeLore.name, _before);   // note which float this module made
     }
     // Refresh location dropdown from new lore data
     _populateLocationDropdown();
+}
+
+// ── Active lore's floating HUD ────────────────────────────────────────────────
+// Each lore module builds its own floating HUD and publishes a toggle on window
+// when it creates it (X-Change: _xcwFloatToggle + #xcw-float, simple-lore:
+// _simpleLoreFloatToggle + #sl-float). The names are the module's choice, so core
+// cannot hardcode one -- it used to hardcode X-Change's, which meant the X-Change
+// panel was force-opened even when another module was active, and users who had
+// never loaded X-Change got no panel at all.
+// A module may expose toggleFloat() on its export; otherwise we detect the float
+// it created by diffing window + the DOM across its onSettingsRendered() call.
+const FLOAT_GLOBAL_RE = /^_.*FloatToggle$/;
+const _loreFloats = {};   // lore name -> { toggleKey, elId }
+
+function _floatSnapshot() {
+    return {
+        globals: new Set(Object.keys(window).filter(k => FLOAT_GLOBAL_RE.test(k))),
+        elIds: new Set(Array.from(document.querySelectorAll('[id*="float" i]')).map(e => e.id)),
+    };
+}
+
+function _rememberFloat(loreName, before) {
+    if (!loreName) return;
+    const rec = _loreFloats[loreName] || {};
+    const newGlobal = Object.keys(window)
+        .filter(k => FLOAT_GLOBAL_RE.test(k) && !before.globals.has(k)).pop();
+    if (newGlobal) rec.toggleKey = newGlobal;
+    const newEl = Array.from(document.querySelectorAll('[id*="float" i]'))
+        .map(e => e.id).filter(id => id && !before.elIds.has(id) && !/-body$|-close$/.test(id)).pop();
+    if (newEl) rec.elId = newEl;
+    if (rec.toggleKey || rec.elId) _loreFloats[loreName] = rec;
+}
+
+// Open the ACTIVE module's float, and hide any other module's that is still up.
+function openActiveFloat() {
+    if (!activeLore) return;
+    const name = activeLore.name;
+    for (const [other, rec] of Object.entries(_loreFloats)) {
+        if (other === name || !rec.elId) continue;
+        const el = document.getElementById(rec.elId);
+        if (el) el.style.display = 'none';
+    }
+    if (typeof activeLore.toggleFloat === 'function') {
+        try { activeLore.toggleFloat(true); return; } catch (_) { /* fall through */ }
+    }
+    const rec = _loreFloats[name];
+    if (!rec) return;
+    const el = rec.elId ? document.getElementById(rec.elId) : null;
+    if (el && el.style.display !== 'none') return;         // already open
+    const toggle = rec.toggleKey && window[rec.toggleKey];
+    if (typeof toggle === 'function') toggle();
+    else if (el) el.style.display = 'block';
 }
 
 function clearModuleSettings() {
@@ -1833,16 +1902,9 @@ function saveSettings() {
             }
         } catch (_) { /* non-critical */ }
 
-        // Force the floating status window open on boot
-        // Small delay to ensure onSettingsRendered has run and created the float
-        setTimeout(() => {
-            const floatWin = document.getElementById('xcw-float');
-            if (floatWin && floatWin.style.display === 'none') {
-                if (typeof window._xcwFloatToggle === 'function') window._xcwFloatToggle();
-            } else if (!floatWin && typeof window._xcwFloatToggle === 'function') {
-                window._xcwFloatToggle();
-            }
-        }, 500);
+        // Open the ACTIVE module's floating status window on boot, if the user
+        // wants that. Small delay so onSettingsRendered has created the float.
+        if (settings.autoOpenHud) setTimeout(openActiveFloat, 500);
     }
 
     const { eventSource, event_types } = ctx;

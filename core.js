@@ -165,10 +165,10 @@ async function _writeSidecarDebug(state) {
 
         // v2.1.4 — resolve the swipe index of the AI message this capture belongs to.
         // Without it every swipe of a turn overwrote the same sidecar and only the
-        // LAST swipe survived, so the first generation of a transformation turn (the
-        // one that carries events + priorityDirective; later swipes take the engine's
-        // regen branch) was unrecoverable. Same message-resolution walk as
-        // writeMsgState so the index always matches the state slot that was saved.
+        // LAST swipe survived, so the first generation of a turn (the one that
+        // carries the lore's events and directive; later swipes take its regen
+        // branch) was unrecoverable. Same message-resolution walk as writeMsgState
+        // so the index always matches the state slot that was saved.
         let swipeIdx = 0;
         try {
             const chatArr = ctx.chat || [];
@@ -298,7 +298,7 @@ function _buildAssembledCapture(opts) {
 // turns' state) all ended up sharing the same mutable object. Result: when
 // processTurn mutated `state` during swipe N, the mutation propagated back to
 // every other swipe slot's saved state. Once chat.json serialized, all swipes
-// looked identical — the body_modifier reroll worked at runtime but never
+// looked identical — the lore's per-swipe reroll worked at runtime but never
 // stuck per-slot. Cloning forces each call to start with a fresh independent
 // state and write back its own snapshot.
 function _cloneState(s) {
@@ -318,15 +318,14 @@ function readMsgState() {
             // undefined and walked back to the PRIOR AI message's state — whose
             // `_last_chat_msg_count` is stale → `isRegen` evaluated false →
             // processTurn re-ran full turn each swipe → turn counter incremented
-            // and arousal compounded.
+            // and per-turn counters compounded.
             //
             // Fix: walk the CURRENT msg's variables slots from highest down,
             // returning the most recent completed swipe's state. That state's
             // `_last_chat_msg_count` matches current chatMsgCount → isRegen=true
-            // → processTurn runs regen branch → no turn increment, no arousal
-            // mutation. TX-turn body_modifier reroll still works because the
-            // regen branch resets `resolved_body` + `card_body` and re-runs
-            // buildTransformationGuidance (which contains the reroll RNG).
+            // → processTurn runs its regen branch → no turn increment and no
+            // per-turn mutation, while the lore is still free to re-roll whatever
+            // it re-rolls on a swipe.
             if (msg.variables && typeof msg.variables === 'object') {
                 const slotKeys = Object.keys(msg.variables)
                     .map(k => parseInt(k, 10))
@@ -636,7 +635,7 @@ function getTokenBudgets(contextSize) {
  *   2. Scene context   – the state header from the lore engine
  *   3. Story summary   – compressed beat history ("Previously: …")
  *   4. Recent messages  – last N messages for dialogue continuity
- *   5. Current turn     – user message with injections (brief, TX, rules)
+ *   5. Current turn     – user message with the lore's injections
  *
  * @param {Object} pending - window._owPendingInjection data
  * @param {Array}  messages - payload.messages from the outgoing request
@@ -648,58 +647,42 @@ function getTokenBudgets(contextSize) {
  * This gives the plugin full control over the prompt in text completion mode
  * without needing a model-specific chat template.
  */
-function messagesToChatML(messages, isPriorityTurn) {
+function messagesToChatML(messages) {
     let prompt = '';
     for (const msg of messages) {
         prompt += '<|im_start|>' + (msg.role || 'user') + '\n' + (msg.content || '') + '<|im_end|>\n';
     }
-    // On priority/TX turns, add the TX directive as a final system message
-    if (isPriorityTurn) {
-        prompt += '<|im_start|>system\nWrite the full transformation scene now. Use the physical guide as your style reference. Multiple detailed paragraphs describing each physical change. Each change gets its own paragraph. Do not write a short response.<|im_end|>\n';
-    }
+    // v2.2.0 -- a hardcoded "Write the full transformation scene now..." system turn used
+    // to be appended here on priority turns. That is lore prose written into the framework,
+    // and it was redundant: the caller already appends the lore's own priorityDirective to
+    // the message array before serialization, so the model got both.
     // End with assistant start token so the model generates
     prompt += '<|im_start|>assistant\n';
     return prompt;
 }
 
 /**
- * Post-TX example dialogue (Cody 2026-08-29).
+ * Apply the lore module's find/replace pairs to the payload messages.
  *
- * A card's `mes_example` is written for its ORIGINAL body and is correct pre-TX, so it
- * must not be edited. Cards that need it instead carry a SECOND table at
- * `data.extensions.xcw.mes_example_post_tx`, written for the transformed body. While a
- * transformation is active we swap one for the other.
- *
- * Returns {orig, post} so the caller can do a LITERAL string swap. That matters: ST puts
- * examples either inside the system prompt or in separate messages depending on settings,
- * and swapping the card's own exact text finds them in both cases without parsing <START>
- * regions. Cards with no post-TX table return null and behave exactly as before.
+ * v2.2.0 -- this used to be postTxExamplePair() + applyPostTxExamples(), which read
+ * card.data.extensions.xcw.mes_example_post_tx directly and knew that the swap was
+ * gated on a transformation having happened. That is lore knowledge, and it does not
+ * belong in the framework. The lore module now returns turnResult.messageReplacements
+ * and this applies them without knowing what any of it means.
  */
-function postTxExamplePair(ctx) {
-    try {
-        const c = ctx?.characters?.[ctx?.characterId];
-        if (!c) return null;
-        const d = c.data || c;
-        const post = d?.extensions?.xcw?.mes_example_post_tx;
-        if (typeof post !== 'string' || !post.trim()) return null;
-        const orig = String(d?.mes_example || c?.mes_example || '').trim();
-        if (!orig) return null;
-        return { orig, post: post.trim() };
-    } catch (e) {
-        return null;
-    }
-}
-
-/** Swap the pre-TX example block for the post-TX one, in-place, wherever it appears. */
-function applyPostTxExamples(messages, pair) {
-    if (!pair || !Array.isArray(messages)) return 0;
+function applyMessageReplacements(messages, pairs) {
+    if (!Array.isArray(pairs) || !pairs.length || !Array.isArray(messages)) return 0;
     let hits = 0;
-    for (const m of messages) {
-        if (!m || typeof m.content !== 'string' || !m.content.includes(pair.orig)) continue;
-        m.content = m.content.split(pair.orig).join(pair.post);
-        hits++;
+    for (const pair of pairs) {
+        if (!pair || typeof pair.find !== 'string' || typeof pair.replace !== 'string') continue;
+        if (!pair.find) continue;
+        for (const m of messages) {
+            if (!m || typeof m.content !== 'string' || !m.content.includes(pair.find)) continue;
+            m.content = m.content.split(pair.find).join(pair.replace);
+            hits++;
+        }
     }
-    if (hits) console.log('[OW] post-TX examples swapped in ' + hits + ' message(s)');
+    if (hits) console.log('[OW] lore replacements applied in ' + hits + ' message(s)');
     return hits;
 }
 
@@ -707,31 +690,18 @@ function buildScenePage(pending, messages) {
     const scenePage = [];
 
     // --- Scrub: swap in scrubbed messages if the lore engine provided them ---
-    // The engine strips pill color/effect names so the model never sees them.
+    // The lore decides what to hide from the model; this just uses what it returns.
     if (pending.scrubbed_messages && pending.scrubbed_messages.length) {
         messages = pending.scrubbed_messages;
     }
 
     // --- Layer 1: System message (character card + guidelines) ---------------
-    // Filter to actor-relevant content only — engine-internal fields (Stats:,
-    // Sex Baseline:, Anatomy Snapshot:, raw build data) are stripped so the
-    // model only receives what it needs to voice the character well.
+    // v2.2.0 -- the hardcoded Stats:/Sex Baseline:/Anatomy Snapshot: regexes that used
+    // to run here were X-Change card sections written into the generic framework. They
+    // now come from the lore module as cardStripPatterns like everything else.
     const sysMsg = messages.find(m => m.role === 'system');
     if (sysMsg) {
-        let sysContent = sysMsg.content || '';
-
-        // Strip engine-internal lines the model has no use for as an actor.
-        // These fields are already extracted by processTurn for statgen.
-        sysContent = sysContent
-            // Remove Stats: line entirely
-            .replace(/^Stats:.*$/m, '')
-            // Remove Sex Baseline: line
-            .replace(/^Sex Baseline:.*$/m, '')
-            // Remove Anatomy Snapshot block (header + indented content)
-            .replace(/^Anatomy Snapshot:\s*\n(?:.*\n)*?(?=\n[A-Z]|\n*$)/m, '')
-            // Collapse multiple blank lines to one
-            .replace(/\n{3,}/g, '\n\n')
-            .trim();
+        let sysContent = (sysMsg.content || '').replace(/\n{3,}/g, '\n\n').trim();
 
         // Apply lore-engine-driven card strip patterns (engine owns what to remove)
         for (const pat of (pending.cardStripPatterns || [])) {
@@ -740,36 +710,14 @@ function buildScenePage(pending, messages) {
         }
         sysContent = sysContent.replace(/\n{3,}/g, '\n\n').trim();
 
-        // Post-TX: replace old Appearance + Anatomy with transformed body descriptors
-        if (pending.anatomyOverride) {
-            // Strip old Appearance block
-            sysContent = sysContent.replace(/^Appearance:\s*\n(?:.*\n)*?(?=\n[A-Z]|\n*$)/m, '');
-            // Strip old Sexual Tendencies block
-            sysContent = sysContent.replace(/^Sexual Tendencies:\s*\n(?:.*\n)*?(?=\n[A-Z]|\n*$)/m, '');
-            // Strip any remaining Anatomy Snapshot that survived first pass
-            sysContent = sysContent.replace(/^Anatomy Snapshot:\s*\n(?:.*\n)*?(?=\n[A-Z]|\n*$)/m, '');
-            // Line-level stripping: engine provides words to remove from card text
-            if (pending.stripWords && pending.stripWords.length) {
-                const pattern = new RegExp('\\b(' + pending.stripWords.join('|') + ')\\b', 'i');
-                sysContent = sysContent.split('\n').filter(line => {
-                    // Keep labeled header lines (Name:, Age:, etc.) even if they match
-                    if (/^[A-Z][a-z]+:/.test(line.trim())) return true;
-                    return !pattern.test(line);
-                }).join('\n');
-            }
-            // Collapse blanks
-            sysContent = sysContent.replace(/\n{3,}/g, '\n\n').trim();
-            // Inject new anatomy after the Name/Age/Sex header
-            const nameBlock = sysContent.match(/^(?:Name:.*\n(?:Age:.*\n)?(?:Sex:.*\n)?)/m);
-            if (nameBlock) {
-                const insertPos = nameBlock.index + nameBlock[0].length;
-                sysContent = sysContent.substring(0, insertPos) + '\n' + pending.anatomyOverride + '\n' + sysContent.substring(insertPos);
-            } else {
-                // Fallback: prepend
-                sysContent = pending.anatomyOverride + '\n\n' + sysContent;
-            }
-            sysContent = sysContent.replace(/\n{3,}/g, '\n\n').trim();
-        }
+        // v2.2.0 -- an anatomyOverride / stripWords rewrite used to run here: strip the
+        // card's Appearance + Sexual Tendencies + Anatomy Snapshot blocks, filter lines
+        // containing lore-supplied words, then splice replacement anatomy in after the
+        // Name/Age/Sex header. Every part of that was X-Change-specific, it read the
+        // lore's own state keys (_card_anatomy_override, _card_strip_words) straight out
+        // of the extension, and it was dead in practice -- pending.systemPrompt below
+        // replaces sysContent wholesale and both shipped lore modules set it. The lore
+        // now does this inside the system prompt it already builds.
 
         // Append any system-position inject entries to the system message
         for (const inj of (pending.inject || [])) {
@@ -782,22 +730,11 @@ function buildScenePage(pending, messages) {
         if (pending.systemPrompt) {
             sysContent = pending.systemPrompt;
 
-            // v2.1.2 — de-duplicate the transformation block.
-            // On a priority turn the lore's <transformation> block is appended verbatim as
-            // the FINAL system message (see the priorityDirective push after this function).
-            // But pending.systemPrompt carries the same block, and this assignment overrides
-            // sysContent wholesale — bypassing the `!isPriorityTurn` guard further down that
-            // was meant to hold the header back. Net effect: the block shipped twice, ~8.6k
-            // chars of it, measured at 36% of a transformation turn's entire payload.
-            // Only strip when the block is provably present in the directive we are about to
-            // append, so nothing is ever dropped silently.
-            const priorityTurn = pending.priorityInjection === true || pending.recentMessageCount === 1;
-            if (priorityTurn && pending.priorityDirective) {
-                const dup = sysContent.match(/<transformation[^>]*>[\s\S]*?<\/transformation>/);
-                if (dup && pending.priorityDirective.indexOf(dup[0].slice(0, 200)) !== -1) {
-                    sysContent = sysContent.replace(dup[0], '').replace(/\n{3,}/g, '\n\n').trim();
-                }
-            }
+            // v2.2.0 -- a de-duplication pass used to live here, matching a literal
+            // <transformation> tag to drop the copy that the lore put in BOTH the system
+            // prompt and the priority directive. Matching a lore's tag name is exactly the
+            // kind of thing that does not belong in the framework. Engine v7.13.29 stops
+            // emitting the second copy instead.
         }
 
         scenePage.push({ role: 'system', content: sysContent });
@@ -869,17 +806,14 @@ function buildScenePage(pending, messages) {
     if (currentUserMsg) {
         let content = currentUserMsg.content || '';
 
-        // Prepend the director brief — suppressed on TX turns
+        // Prepend the director brief — suppressed on priority turns
         if (pending.brief && !isPriorityTurn) {
             content = `<director>\n${pending.brief}\n</director>\n\n` + content;
         }
 
-        // On priority turns, inject the full header as an active instruction
-        // between the director brief and the user's text.  The lore engine
-        // includes its own write instruction, so the plugin stays generic.
-        // On priority turns, TX header goes as final system message instead
-        // of being embedded here. User message stays clean.
-        // if (isPriorityTurn && pending.header) { ... moved to post-assembly }
+        // On priority turns the lore's directive goes in as the final system
+        // message after assembly instead of being embedded here, so the user
+        // message stays clean.
 
         // Process remaining inject entries (non-system, non-header, non-brief)
         for (const inj of (pending.inject || [])) {
@@ -896,9 +830,9 @@ function buildScenePage(pending, messages) {
                     break;
                 case 'depth': {
                     const depth = inj.depth || 0;
-                    // On priority/TX turns, skip depth-0 injections (hard
-                    // rules about orgasm gates etc.) — they're not relevant
-                    // during transformation and can trigger model safety.
+                    // On priority turns, skip depth-0 injections. The lore puts
+                    // its own instructions in the directive for these turns, and
+                    // depth-0 hard rules can work against them.
                     if (depth === 0 && isPriorityTurn) {
                         break;
                     }
@@ -1626,7 +1560,7 @@ function renderModuleSettings() {
     if (typeof activeLore.onSettingsRendered === 'function') {
         const _before = _floatSnapshot();
         activeLore.onSettingsRendered(activeLore._config || {}, {
-            clearPersonaPill: clearPersonaState,
+            clearPersonaState: clearPersonaState,
         });
         _rememberFloat(activeLore.name, _before);   // note which float this module made
     }
@@ -1732,9 +1666,9 @@ async function clearState() {
 }
 
 async function clearPersonaState() {
-    if (!confirm('Clear persona pill/effect state for this chat?')) return;
+    if (!confirm('Clear persona state for this chat?')) return;
     await writePersonaState({});
-    alert('Persona pill state cleared.');
+    alert('Persona state cleared.');
 }
 
 // -- Debug panel -------------------------------------------------------------
@@ -1773,7 +1707,7 @@ async function _renderDebugContent(panel, state, events) {
             ps = readPersonaState() || {};
         } catch (e) { /* ignore */ }
         const raw = activeLore.getDebugInfo(state, events, activeLore._config || {}, ps);
-        // v2.1.3 — a lore module may return { sections: [{title, text}] } (X-Change does).
+        // v2.1.3 — a lore module may return { sections: [{title, text}] }.
         // This used to JSON.stringify that, so the panel showed raw JSON with escaped
         // newlines — unreadable, especially on a phone or tablet. Keep the flat text for
         // the Copy button, and render the sections as collapsible blocks below.
@@ -2103,6 +2037,11 @@ function saveSettings() {
                                 cardDescription: charData?.description || '',
                                 cardScenario: charData?.scenario || '',
                                 cardTags: charData?.tags || [],
+                                // v2.2.0 -- raw card fields passed straight through so the
+                                // lore can read its own namespace instead of the extension
+                                // reaching into card.data.extensions.xcw itself.
+                                cardExtensions: (charData?.data?.extensions) || charData?.extensions || {},
+                                cardExampleDialogue: (charData?.data?.mes_example) || charData?.mes_example || '',
                                 locationOverride: settings.locationOverride || '',
                                 scenarioOverride: settings.scenarioOverride || '',
                             });
@@ -2163,13 +2102,11 @@ function saveSettings() {
                             // priority turns. Lore-agnostic plumbing.
                             priorityDirective:  resolveMacros(turnResult.priorityDirective || null, ctx),
                             personaBlock:       resolveMacros(turnResult.personaBlock || null, ctx),
-                            anatomyOverride:    state._card_anatomy_override || null,
-                            stripWords:         state._card_strip_words || null,
-                            // Post-TX example dialogue — gated on the same signal as the
-                            // anatomy override, so examples and body text can never
-                            // disagree about which state the character is in.
-                            postTxExamples:     state._card_anatomy_override
-                                                  ? postTxExamplePair(ctx) : null,
+                            // v2.2.0 -- generic find/replace pairs from the lore. Replaces
+                            // anatomyOverride / stripWords / postTxExamples, which were
+                            // X-Change concepts and were read straight off the lore's own
+                            // state object by the framework.
+                            messageReplacements: turnResult.messageReplacements || null,
                         };
 
                         // Also resolve macros in inject entries
@@ -2179,13 +2116,12 @@ function saveSettings() {
 
                         const isPriorityTurn = pending.priorityInjection || pending.recentMessageCount === 1;
 
-                        // Swap pre-TX example dialogue for the post-TX table BEFORE the
-                        // branch, so whichever path runs inherits the corrected text —
-                        // scene-page mode copies the system message through, and fallback
-                        // mode passes native history straight out. Runs on the source
-                        // array, so it catches examples whether ST folded them into the
-                        // system prompt or sent them as their own messages.
-                        applyPostTxExamples(payload.messages, pending.postTxExamples);
+                        // Apply the lore's replacements BEFORE the branch so whichever path
+                        // runs inherits the corrected text — scene-page mode copies the system
+                        // message through, and fallback mode passes native history straight
+                        // out. Runs on the source array, so it catches text whether ST folded
+                        // it into the system prompt or sent it as its own message.
+                        applyMessageReplacements(payload.messages, pending.messageReplacements);
 
                         if (settings.scenePageMode) {
                             // ── Scene Page mode: full rebuild ────────────────
@@ -2207,7 +2143,7 @@ function saveSettings() {
                             // Full chat history passes through untouched. Header,
                             // brief, and priority directive are still injected.
 
-                            // Scrub pill names from messages in fallback mode too
+                            // Use the lore's scrubbed messages in fallback mode too
                             if (pending.scrubbed_messages && pending.scrubbed_messages.length) {
                                 payload.messages = pending.scrubbed_messages;
                             }
@@ -2227,12 +2163,15 @@ function saveSettings() {
                                 }
                             }
 
-                            // Priority / TX turns: append header + write directive
-                            if (isPriorityTurn && pending.header) {
+                            // v2.2.0 -- priority turns append the lore-supplied directive,
+                            // same as scene-page and text-completion mode. This used to push
+                            // pending.header plus a hardcoded "Write the full transformation
+                            // scene now..." sentence, which was lore prose living in the
+                            // framework AND meant this path ignored priorityDirective entirely.
+                            if (isPriorityTurn && pending.priorityDirective) {
                                 payload.messages.push({
                                     role: 'system',
-                                    content: pending.header +
-                                        '\n\nWrite the full transformation scene now. Use the physical guide above as your style reference. Multiple detailed paragraphs describing each physical change. Each change gets its own paragraph. Do not write a short response.',
+                                    content: pending.priorityDirective,
                                 });
                             }
                         }
@@ -2349,6 +2288,8 @@ function saveSettings() {
                                     cardDescription: charDataTX?.description || '',
                                     cardScenario: charDataTX?.scenario || '',
                                     cardTags: charDataTX?.tags || [],
+                                    cardExtensions: (charDataTX?.data?.extensions) || charDataTX?.extensions || {},
+                                    cardExampleDialogue: (charDataTX?.data?.mes_example) || charDataTX?.mes_example || '',
                                     locationOverride: settings.locationOverride || '',
                                     scenarioOverride: settings.scenarioOverride || '',
                                 });
@@ -2387,7 +2328,10 @@ function saveSettings() {
                                     // v2.0.7 — lore-owned priority append text (see chat-completion comment)
                                     priorityDirective: resolveMacros(turnResultTX.priorityDirective || null, ctx),
                                     personaBlock:      resolveMacros(turnResultTX.personaBlock || null, ctx),
+                                    messageReplacements: turnResultTX.messageReplacements || null,
                                 };
+
+                                applyMessageReplacements(payload.messages, pendingTX.messageReplacements);
 
                                 // Also resolve macros in inject entries
                                 for (const inj of pendingTX.inject) {
@@ -2440,7 +2384,7 @@ function saveSettings() {
                                 }
 
                                 // Serialize to ChatML and replace payload.prompt entirely
-                                payload.prompt = messagesToChatML(assembledMessages, isPriorityTX);
+                                payload.prompt = messagesToChatML(assembledMessages);
                                 // Remove messages array so the backend uses our prompt string
                                 delete payload.messages;
                                 opts.body = JSON.stringify(payload);

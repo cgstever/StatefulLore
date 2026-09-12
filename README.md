@@ -89,7 +89,7 @@ In SillyTavern: **API Connections → Chat Completion** (not Text Completion).
 3. Enter the repository URL:
 
 ```
-https://github.com/cgstever/StatefullLore
+https://github.com/cgstever/StatefulLore
 ```
 
 4. Click Install — SillyTavern will clone the repo into your extensions folder
@@ -105,7 +105,7 @@ cd SillyTavern/data/default-user/extensions/third-party/
 2. Clone this repository:
 
 ```bash
-git clone https://github.com/cgstever/StatefullLore.git
+git clone https://github.com/cgstever/StatefulLore.git
 ```
 
 3. Restart SillyTavern
@@ -139,7 +139,7 @@ Any lore module hosted on GitHub can be loaded the same way via its raw URL.
 
 ## Configuration
 
-Settings are available in the SillyTavern extensions panel under **StatefullLore**:
+Settings are available in the SillyTavern extensions panel under **StatefulLore**:
 
 | Setting | Default | Description |
 |---------|---------|-------------|
@@ -158,7 +158,7 @@ Settings are available in the SillyTavern extensions panel under **StatefullLore
 │              SillyTavern                 │
 │                                         │
 │  ┌───────────────────────────────────┐  │
-│  │         StatefullLore             │  │
+│  │         StatefulLore              │  │
 │  │                                   │  │
 │  │  ┌─────────┐   ┌──────────────┐  │  │
 │  │  │  Fetch   │   │   IndexedDB  │  │  │
@@ -185,7 +185,7 @@ Settings are available in the SillyTavern extensions panel under **StatefullLore
 ## File Structure
 
 ```
-StatefullLore/
+StatefulLore/
 ├── index.js         ← Main extension file (~64 KB) — ST integration, state management, fetch interceptor
 ├── manifest.json    ← Extension metadata (v1.37.0)
 └── style.css        ← Extension panel styles

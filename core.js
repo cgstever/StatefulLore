@@ -163,11 +163,30 @@ async function _writeSidecarDebug(state) {
                    : (state._xrebuild && state._xrebuild.turn != null) ? state._xrebuild.turn
                    : 0;
 
+        // v2.1.4 — resolve the swipe index of the AI message this capture belongs to.
+        // Without it every swipe of a turn overwrote the same sidecar and only the
+        // LAST swipe survived, so the first generation of a transformation turn (the
+        // one that carries events + priorityDirective; later swipes take the engine's
+        // regen branch) was unrecoverable. Same message-resolution walk as
+        // writeMsgState so the index always matches the state slot that was saved.
+        let swipeIdx = 0;
+        try {
+            const chatArr = ctx.chat || [];
+            for (let i = chatArr.length - 1; i >= 0; i--) {
+                const m = chatArr[i];
+                if (m && !m.is_user && !m.is_system) {
+                    swipeIdx = parseInt(m.swipe_id, 10) || 0;
+                    break;
+                }
+            }
+        } catch (_) { /* default 0 */ }
+
         const payload = {
             captured_at: new Date().toISOString(),
             character: charName,
             chat_id: chatId,
             turn: turn,
+            swipe: swipeIdx,
             engine_version: state.engine_version || null,
             _xrebuild: state._xrebuild || null,
             _debug_dump_assembled: (state._debug_dump && state._debug_dump.assembled) || null,
@@ -182,7 +201,9 @@ async function _writeSidecarDebug(state) {
         // VERIFIED against the live validator (engine/_validate_name_test.mjs).
         // So use a FLAT name (no slashes) encoding char + chat + turn. Lands at
         // data/<user>/user/files/. _pull_logs.py reads this flat name.
-        const filename = `xcwdbg_${safe(charName)}_${safe(chatId)}_turn_${turnStr}.json`;
+        // v2.1.4 — swipe index appended so swipes no longer overwrite each other.
+        const swipeStr = String(swipeIdx).padStart(2, '0');
+        const filename = `xcwdbg_${safe(charName)}_${safe(chatId)}_turn_${turnStr}_s${swipeStr}.json`;
 
         const headers = ctx.getRequestHeaders();
         const body = JSON.stringify(payload);
@@ -205,6 +226,7 @@ async function _writeSidecarDebug(state) {
         if (state._debug_dump) {
             delete state._debug_dump.assembled;
             state._debug_dump.sidecar_turn = turn;
+            state._debug_dump.sidecar_swipe = swipeIdx;
             state._debug_dump.sidecar_file = filename;
         }
     } catch (e) {

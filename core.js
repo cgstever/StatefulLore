@@ -1744,13 +1744,25 @@ async function _renderDebugContent(panel, state, events) {
         state = Object.assign({}, state, { _chosen_name: _slLastChosenName });
     }
     let info = '';
+    let debugSections = null;
     if (activeLore && typeof activeLore.getDebugInfo === 'function') {
         let ps = {};
         try {
             ps = readPersonaState() || {};
         } catch (e) { /* ignore */ }
         const raw = activeLore.getDebugInfo(state, events, activeLore._config || {}, ps);
-        info = typeof raw === 'string' ? raw : JSON.stringify(raw, null, 2);
+        // v2.1.3 — a lore module may return { sections: [{title, text}] } (X-Change does).
+        // This used to JSON.stringify that, so the panel showed raw JSON with escaped
+        // newlines — unreadable, especially on a phone or tablet. Keep the flat text for
+        // the Copy button, and render the sections as collapsible blocks below.
+        if (raw && Array.isArray(raw.sections)) {
+            debugSections = raw.sections.filter(x => x && (x.title || x.text));
+            info = debugSections.map(x => `== ${x.title || 'SECTION'} ==\n${x.text || ''}`).join('\n\n');
+        } else if (typeof raw === 'string') {
+            info = raw;
+        } else {
+            info = JSON.stringify(raw, null, 2);
+        }
     } else {
         info = [
             `Turn: ${state?.turn || '?'}`,
@@ -1758,26 +1770,53 @@ async function _renderDebugContent(panel, state, events) {
         ].join('\n');
     }
 
-    panel.innerHTML = `<pre style="
-        font-family: monospace;
-        font-size: 11px;
-        line-height: 1.4;
-        background: var(--SmartThemeBlurTintColor, #1a1a2e);
-        color: var(--SmartThemeBodyColor, #ccc);
-        padding: 8px 10px;
-        border-radius: 4px;
-        max-height: 500px;
-        overflow-y: auto;
-        white-space: pre-wrap;
-        word-break: break-word;
-        margin: 4px 0;
-    ">${escapeHtml(info)}</pre>
+    // v2.1.3 — sectioned, collapsible, and readable on a narrow screen.
+    // white-space:pre + overflow-x:auto per section so the engine's box-drawn tables
+    // scroll sideways instead of wrapping into confetti on a tablet.
+    const PRE = 'font-family:monospace;font-size:12px;line-height:1.45;'
+        + 'background:var(--SmartThemeBlurTintColor,#1a1a2e);color:var(--SmartThemeBodyColor,#ccc);'
+        + 'padding:8px 10px;border-radius:4px;white-space:pre;overflow-x:auto;margin:0;';
+    let body;
+    if (debugSections && debugSections.length) {
+        body = debugSections.map((sec, i) => {
+            const title = escapeHtml(sec.title || 'SECTION');
+            const text = String(sec.text || '');
+            const lines = text ? text.split('\n').length : 0;
+            return `<details data-dbg-section="${escapeHtml(sec.title || ('s' + i))}" style="margin:3px 0;">
+                <summary style="cursor:pointer;padding:5px 8px;border-radius:4px;font-size:12px;
+                    background:var(--SmartThemeQuoteColor,#2a2a4a);color:var(--SmartThemeBodyColor,#ddd);
+                    user-select:none;">${title} <span style="opacity:.55;">(${lines})</span></summary>
+                <pre style="${PRE}">${escapeHtml(text)}</pre>
+            </details>`;
+        }).join('');
+        body = `<div style="max-height:60vh;overflow-y:auto;margin:4px 0;">${body}</div>`;
+    } else {
+        body = `<pre style="${PRE}max-height:60vh;overflow-y:auto;margin:4px 0;">${escapeHtml(info)}</pre>`;
+    }
+    panel.innerHTML = `${body}
     <div style="display:flex; gap:4px; margin-top:4px; flex-wrap:wrap;">
         <button class="menu_button" id="ow-debug-refresh">Refresh</button>
         <button class="menu_button" id="ow-debug-copy">Copy</button>
         <button class="menu_button" id="ow-debug-dump-state">Dump JSON</button>
         <button class="menu_button" id="ow-debug-dump-header">Dump Header</button>
     </div>`;
+
+    // v2.1.3 — remember which debug sections are open, same pattern as the HUD.
+    try {
+        const KEY = 'sl-debug-open';
+        const stored = JSON.parse(localStorage.getItem(KEY) || '{}');
+        panel.querySelectorAll('details[data-dbg-section]').forEach(d => {
+            const k = d.dataset.dbgSection;
+            if (k in stored) d.open = stored[k];
+            d.addEventListener('toggle', () => {
+                try {
+                    const cur = JSON.parse(localStorage.getItem(KEY) || '{}');
+                    cur[k] = d.open;
+                    localStorage.setItem(KEY, JSON.stringify(cur));
+                } catch (e) { /* ignore */ }
+            });
+        });
+    } catch (e) { /* non-critical */ }
 
     document.getElementById('ow-debug-refresh')?.addEventListener('click', refreshDebugPanel);
 

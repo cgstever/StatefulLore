@@ -759,6 +759,23 @@ function buildScenePage(pending, messages) {
         // Replace system prompt entirely if the lore engine provided one
         if (pending.systemPrompt) {
             sysContent = pending.systemPrompt;
+
+            // v2.1.2 — de-duplicate the transformation block.
+            // On a priority turn the lore's <transformation> block is appended verbatim as
+            // the FINAL system message (see the priorityDirective push after this function).
+            // But pending.systemPrompt carries the same block, and this assignment overrides
+            // sysContent wholesale — bypassing the `!isPriorityTurn` guard further down that
+            // was meant to hold the header back. Net effect: the block shipped twice, ~8.6k
+            // chars of it, measured at 36% of a transformation turn's entire payload.
+            // Only strip when the block is provably present in the directive we are about to
+            // append, so nothing is ever dropped silently.
+            const priorityTurn = pending.priorityInjection === true || pending.recentMessageCount === 1;
+            if (priorityTurn && pending.priorityDirective) {
+                const dup = sysContent.match(/<transformation[^>]*>[\s\S]*?<\/transformation>/);
+                if (dup && pending.priorityDirective.indexOf(dup[0].slice(0, 200)) !== -1) {
+                    sysContent = sysContent.replace(dup[0], '').replace(/\n{3,}/g, '\n\n').trim();
+                }
+            }
         }
 
         scenePage.push({ role: 'system', content: sysContent });

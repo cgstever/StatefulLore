@@ -38,7 +38,7 @@ StatefulLore replaces that entire layer. None of those tools are involved. Inste
 - That snapshot is injected directly into the prompt as a structured header
 - The model reads it, reacts, and writes — it doesn't need to remember anything
 
-Your existing lorebook content isn't wasted — it's actually a head start. The world-building, character details, and rules you've already written are the hard part. A lore module is just a JavaScript file that wraps that content with persistent state and real mechanics. If you have a lorebook you've put work into, it can be converted. Guides for how to structure a lore module and how to translate an existing lorebook are on the way.
+Your existing lorebook content isn't wasted — it's actually a head start. The world-building, character details, and rules you've already written are the hard part. A lore module is just a JavaScript file that wraps that content with persistent state and real mechanics. If you have a lorebook you've put work into, it can be converted — and you do not have to write the code yourself. [**guides/ai-translation.md**](guides/ai-translation.md) walks through handing your existing lorebook to an AI (Claude, Grok, whatever you already use) and getting a working module back.
 
 ---
 
@@ -111,6 +111,28 @@ git clone https://github.com/cgstever/StatefulLore.git
 3. Restart SillyTavern
 
 The extension will appear in the extensions panel on next load.
+
+---
+
+## Try it in five minutes
+
+You do not need to write anything to see what this does.
+
+1. Install the extension (below)
+2. Set SillyTavern to **Chat Completion** mode
+3. In the StatefulLore panel, load this lore module URL:
+
+```
+https://raw.githubusercontent.com/cgstever/simple-lore/main/lore.js
+```
+
+4. Start a chat
+
+That's [simple-lore](https://github.com/cgstever/simple-lore) — a complete D&D 5e module. You'll get character
+creation, then a live HUD with your character sheet, HP, XP, inventory and quests, all tracked by the extension
+rather than by the model. Play for a few turns and watch the panel update.
+
+Once you've seen it work, [**Writing your own lore**](#writing-your-own-lore) covers making your own.
 
 ---
 
@@ -187,9 +209,31 @@ Settings are available in the SillyTavern extensions panel under **StatefulLore*
 ```
 StatefulLore/
 ├── index.js         ← Main extension file (~64 KB) — ST integration, state management, fetch interceptor
-├── manifest.json    ← Extension metadata (v1.37.0)
+├── manifest.json    ← Extension metadata (name, version, entry points)
 └── style.css        ← Extension panel styles
 ```
+
+---
+
+## Writing your own lore
+
+Two guides and two complete, working modules ship in this repo:
+
+**Guides**
+
+- [**guides/ai-translation.md**](guides/ai-translation.md) — convert an existing SillyTavern lorebook into a lore
+  module using an AI. What to give it, what to ask for, and how to check the result. Start here if you already
+  have a lorebook you like.
+- [**guides/lore-structure.md**](guides/lore-structure.md) — how a lore module is put together: the interface, the
+  state object, how per-turn injection works. Start here if you're writing one from scratch.
+
+**Working examples**
+
+- [`examples/half_life_2.js`](examples/half_life_2.js) — a large module converted from a community lorebook
+- [`examples/american_high_school.js`](examples/american_high_school.js) — a smaller one, easier to read first
+- [simple-lore](https://github.com/cgstever/simple-lore) — the full D&D 5e module, in its own repo
+
+Reading `american_high_school.js` alongside `guides/lore-structure.md` is the fastest way in.
 
 ---
 
@@ -216,7 +260,7 @@ The module receives full state (stats, flags, inventory, effects) and the chat m
 
 ## Version
 
-**v1.37.0**
+See [`manifest.json`](manifest.json) — that's the version SillyTavern reads.
 
 ---
 
@@ -228,4 +272,4 @@ The module receives full state (stats, flags, inventory, effects) and the chat m
 
 ## License
 
-This project is provided as-is for use with SillyTavern.
+[MIT](LICENSE) — use it, fork it, ship lore modules with it.

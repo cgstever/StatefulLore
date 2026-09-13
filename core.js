@@ -719,13 +719,6 @@ function buildScenePage(pending, messages) {
         // replaces sysContent wholesale and both shipped lore modules set it. The lore
         // now does this inside the system prompt it already builds.
 
-        // Append any system-position inject entries to the system message
-        for (const inj of (pending.inject || [])) {
-            if (!inj || !inj.text || inj.position !== 'system') continue;
-            if (inj.text === pending.header || inj.text === pending.brief) continue;
-            sysContent = inj.replace ? inj.text : sysContent + '\n' + inj.text;
-        }
-
         // Replace system prompt entirely if the lore engine provided one
         if (pending.systemPrompt) {
             sysContent = pending.systemPrompt;
@@ -735,6 +728,20 @@ function buildScenePage(pending, messages) {
             // prompt and the priority directive. Matching a lore's tag name is exactly the
             // kind of thing that does not belong in the framework. Engine v7.13.29 stops
             // emitting the second copy instead.
+        }
+
+        // Append any system-position inject entries to the system message.
+        //
+        // v2.2.1 -- this MUST run after the systemPrompt replacement above. It used to run
+        // before it, so the wholesale assignment threw every system-position inject away.
+        // Both shipped lore modules set systemPrompt, which meant `position: 'system'` was
+        // silently dead: a lore could ask for it, the extension would drop it, and nothing
+        // anywhere reported a problem. Found when the X-Change engine started routing its
+        // transformation reference there and 8 KB simply vanished from the payload.
+        for (const inj of (pending.inject || [])) {
+            if (!inj || !inj.text || inj.position !== 'system') continue;
+            if (inj.text === pending.header || inj.text === pending.brief) continue;
+            sysContent = inj.replace ? inj.text : sysContent + '\n' + inj.text;
         }
 
         scenePage.push({ role: 'system', content: sysContent });
